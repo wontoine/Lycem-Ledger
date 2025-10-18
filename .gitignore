@@ -1,0 +1,15 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+db.sqlite3
+
+# Environment
+.env
+
+# Byte-compiled / caches
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,4 @@
+Django==5.2.7
+djangorestframework==3.16.1
+mongoengine==0.29.1
+python-dotenv==1.0.1
