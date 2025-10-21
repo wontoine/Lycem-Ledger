@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+
+## User-specific files
+*.xcodeproj/project.xcworkspace/xcshareddata/UISchemeManagement.plist
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+Packages/
