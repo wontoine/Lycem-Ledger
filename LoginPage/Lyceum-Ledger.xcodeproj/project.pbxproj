@@ -1,0 +1,570 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2F7E16BD2EA16FDD00BF4B84 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2F7E16BC2EA16FDD00BF4B84 /* SwiftUI.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2FD9F3362E958FB900C13E3C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2FD9F3202E958FB400C13E3C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2FD9F3272E958FB400C13E3C;
+			remoteInfo = "Lyceum-Ledger";
+		};
+		2FD9F3402E958FB900C13E3C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2FD9F3202E958FB400C13E3C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2FD9F3272E958FB400C13E3C;
+			remoteInfo = "Lyceum-Ledger";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		2F7E16BC2EA16FDD00BF4B84 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		2FD9F3282E958FB400C13E3C /* Lyceum-Ledger.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lyceum-Ledger.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2FD9F3352E958FB900C13E3C /* Lyceum-LedgerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Lyceum-LedgerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2FD9F33F2E958FB900C13E3C /* Lyceum-LedgerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Lyceum-LedgerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		2FD9F32A2E958FB400C13E3C /* Lyceum-Ledger */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Lyceum-Ledger";
+			sourceTree = "<group>";
+		};
+		2FD9F3382E958FB900C13E3C /* Lyceum-LedgerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Lyceum-LedgerTests";
+			sourceTree = "<group>";
+		};
+		2FD9F3422E958FB900C13E3C /* Lyceum-LedgerUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Lyceum-LedgerUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2FD9F3252E958FB400C13E3C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2F7E16BD2EA16FDD00BF4B84 /* SwiftUI.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F3322E958FB900C13E3C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F33C2E958FB900C13E3C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2F7E16BB2EA16FDC00BF4B84 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2F7E16BC2EA16FDD00BF4B84 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		2FD9F31F2E958FB400C13E3C = {
+			isa = PBXGroup;
+			children = (
+				2FD9F32A2E958FB400C13E3C /* Lyceum-Ledger */,
+				2FD9F3382E958FB900C13E3C /* Lyceum-LedgerTests */,
+				2FD9F3422E958FB900C13E3C /* Lyceum-LedgerUITests */,
+				2F7E16BB2EA16FDC00BF4B84 /* Frameworks */,
+				2FD9F3292E958FB400C13E3C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2FD9F3292E958FB400C13E3C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2FD9F3282E958FB400C13E3C /* Lyceum-Ledger.app */,
+				2FD9F3352E958FB900C13E3C /* Lyceum-LedgerTests.xctest */,
+				2FD9F33F2E958FB900C13E3C /* Lyceum-LedgerUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2FD9F3272E958FB400C13E3C /* Lyceum-Ledger */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2FD9F3492E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-Ledger" */;
+			buildPhases = (
+				2FD9F3242E958FB400C13E3C /* Sources */,
+				2FD9F3252E958FB400C13E3C /* Frameworks */,
+				2FD9F3262E958FB400C13E3C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2FD9F32A2E958FB400C13E3C /* Lyceum-Ledger */,
+			);
+			name = "Lyceum-Ledger";
+			packageProductDependencies = (
+			);
+			productName = "Lyceum-Ledger";
+			productReference = 2FD9F3282E958FB400C13E3C /* Lyceum-Ledger.app */;
+			productType = "com.apple.product-type.application";
+		};
+		2FD9F3342E958FB900C13E3C /* Lyceum-LedgerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2FD9F34C2E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-LedgerTests" */;
+			buildPhases = (
+				2FD9F3312E958FB900C13E3C /* Sources */,
+				2FD9F3322E958FB900C13E3C /* Frameworks */,
+				2FD9F3332E958FB900C13E3C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2FD9F3372E958FB900C13E3C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2FD9F3382E958FB900C13E3C /* Lyceum-LedgerTests */,
+			);
+			name = "Lyceum-LedgerTests";
+			packageProductDependencies = (
+			);
+			productName = "Lyceum-LedgerTests";
+			productReference = 2FD9F3352E958FB900C13E3C /* Lyceum-LedgerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		2FD9F33E2E958FB900C13E3C /* Lyceum-LedgerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2FD9F34F2E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-LedgerUITests" */;
+			buildPhases = (
+				2FD9F33B2E958FB900C13E3C /* Sources */,
+				2FD9F33C2E958FB900C13E3C /* Frameworks */,
+				2FD9F33D2E958FB900C13E3C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2FD9F3412E958FB900C13E3C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2FD9F3422E958FB900C13E3C /* Lyceum-LedgerUITests */,
+			);
+			name = "Lyceum-LedgerUITests";
+			packageProductDependencies = (
+			);
+			productName = "Lyceum-LedgerUITests";
+			productReference = 2FD9F33F2E958FB900C13E3C /* Lyceum-LedgerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2FD9F3202E958FB400C13E3C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					2FD9F3272E958FB400C13E3C = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					2FD9F3342E958FB900C13E3C = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 2FD9F3272E958FB400C13E3C;
+					};
+					2FD9F33E2E958FB900C13E3C = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 2FD9F3272E958FB400C13E3C;
+					};
+				};
+			};
+			buildConfigurationList = 2FD9F3232E958FB400C13E3C /* Build configuration list for PBXProject "Lyceum-Ledger" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2FD9F31F2E958FB400C13E3C;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 2FD9F3292E958FB400C13E3C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2FD9F3272E958FB400C13E3C /* Lyceum-Ledger */,
+				2FD9F3342E958FB900C13E3C /* Lyceum-LedgerTests */,
+				2FD9F33E2E958FB900C13E3C /* Lyceum-LedgerUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2FD9F3262E958FB400C13E3C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F3332E958FB900C13E3C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F33D2E958FB900C13E3C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2FD9F3242E958FB400C13E3C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F3312E958FB900C13E3C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FD9F33B2E958FB900C13E3C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2FD9F3372E958FB900C13E3C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2FD9F3272E958FB400C13E3C /* Lyceum-Ledger */;
+			targetProxy = 2FD9F3362E958FB900C13E3C /* PBXContainerItemProxy */;
+		};
+		2FD9F3412E958FB900C13E3C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2FD9F3272E958FB400C13E3C /* Lyceum-Ledger */;
+			targetProxy = 2FD9F3402E958FB900C13E3C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2FD9F3472E958FB900C13E3C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		2FD9F3482E958FB900C13E3C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		2FD9F34A2E958FB900C13E3C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-Ledger";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2FD9F34B2E958FB900C13E3C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-Ledger";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2FD9F34D2E958FB900C13E3C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-LedgerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lyceum-Ledger.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lyceum-Ledger";
+			};
+			name = Debug;
+		};
+		2FD9F34E2E958FB900C13E3C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-LedgerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lyceum-Ledger.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lyceum-Ledger";
+			};
+			name = Release;
+		};
+		2FD9F3502E958FB900C13E3C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-LedgerUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Lyceum-Ledger";
+			};
+			name = Debug;
+		};
+		2FD9F3512E958FB900C13E3C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Lyceum-LedgerUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Lyceum-Ledger";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2FD9F3232E958FB400C13E3C /* Build configuration list for PBXProject "Lyceum-Ledger" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FD9F3472E958FB900C13E3C /* Debug */,
+				2FD9F3482E958FB900C13E3C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2FD9F3492E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-Ledger" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FD9F34A2E958FB900C13E3C /* Debug */,
+				2FD9F34B2E958FB900C13E3C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2FD9F34C2E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-LedgerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FD9F34D2E958FB900C13E3C /* Debug */,
+				2FD9F34E2E958FB900C13E3C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2FD9F34F2E958FB900C13E3C /* Build configuration list for PBXNativeTarget "Lyceum-LedgerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FD9F3502E958FB900C13E3C /* Debug */,
+				2FD9F3512E958FB900C13E3C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 2FD9F3202E958FB400C13E3C /* Project object */;
+}
