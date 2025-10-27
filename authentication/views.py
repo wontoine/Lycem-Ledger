@@ -7,9 +7,17 @@ from users.models import User, Role
 from .serializers import LoginSerializer
 
 
-def _classify_account(email: str) -> str:
-    domain = settings.COMPANY_EMAIL_DOMAIN.lower()
-    return "employee" if email.lower().endswith(f"@{domain}") else "customer"
+def _classify_account(email) -> str:
+    try:
+        domain = settings.COMPANY_EMAIL_DOMAIN.lower()
+        if isinstance(email, str) and "@" in email and email.lower().endswith(f"@{domain}"):
+            return "employee"
+        # If an email-like string is provided but not company domain, treat as customer.
+        if isinstance(email, str) and "@" in email:
+            return "customer"
+        return "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _role_name_for(role_id: int) -> str:
@@ -35,12 +43,15 @@ class LoginView(APIView):
         if not serializer.is_valid():
             return Response({"approved": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        email = serializer.validated_data["email"]
+        identifier = serializer.validated_data["identifier"]
         password = serializer.validated_data["password"]
 
-        # Find user by email
+        # Find user by email or username
         try:
-            user = User.objects(email=email).first()
+            if "@" in identifier:
+                user = User.objects(email=identifier).first()
+            else:
+                user = User.objects(username=identifier).first()
         except Exception as e:
             return Response({"approved": False, "error": "Database connection error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -55,7 +66,7 @@ class LoginView(APIView):
             return Response({"approved": False, "error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
         role_name = user.role_name or _role_name_for(user.roleID)
-        account_type = _classify_account(user.email)
+        account_type = _classify_account(getattr(user, "email", None))
         is_admin = (role_name.lower() == "admin")
 
         return Response(

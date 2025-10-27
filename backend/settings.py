@@ -90,6 +90,13 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # MongoDB connection for MongoEngine
 from mongoengine import connect
 
+# Optionally start an SSH tunnel (for remote MongoDB) before connecting.
+try:
+    from .connection_ssh import ensure_ssh_tunnel_if_enabled
+    ensure_ssh_tunnel_if_enabled()
+except Exception as e:
+    print(f"SSH tunnel not started: {e}")
+
 # MongoDB connection settings (dict-based)
 MONGODB_SETTINGS = {
     'host': os.environ.get('MONGODB_HOST', 'localhost'),
@@ -104,14 +111,21 @@ MONGODB_SETTINGS = {
 # Optional: prefer a full MongoDB URI to avoid special-character issues in passwords
 MONGODB_URI = os.environ.get('MONGODB_URI')
 
-# Connect to MongoDB (with error handling)
+# Connect to MongoDB (with ping verification)
 try:
     if MONGODB_URI:
         connect(host=MONGODB_URI, alias='default')
-        print("✅ MongoDB connected via URI")
     else:
         connect(**MONGODB_SETTINGS)
-        print("✅ MongoDB connected successfully")
+
+    # Verify the connection by pinging the server
+    try:
+        from mongoengine.connection import get_connection  # type: ignore
+        _conn = get_connection(alias='default')
+        _conn.admin.command('ping')
+        print("✅ MongoDB ping succeeded; connection is healthy")
+    except Exception as ping_err:
+        raise RuntimeError(f"MongoDB ping failed: {ping_err}")
 except Exception as e:
     print(f"⚠️ MongoDB connection failed: {e}")
     print("App will continue but MongoDB features won't work")
