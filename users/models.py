@@ -51,20 +51,30 @@ class User(Document):
         """
         Check if provided password matches the stored hash.
 
-        Transitional behavior:
-        - If `passwordHash` contains a colon, treat it as "salt:hexhash" (PBKDF2-SHA256).
-        - Otherwise, fall back to plaintext comparison to support existing seed data.
-          This should be removed once all passwords are migrated to hashed form.
+        Behavior:
+        - If `passwordHash` contains a colon, treat it as "salt:hexhash" (PBKDF2-SHA256) and compare.
+        - If `passwordHash` appears to be plaintext and matches the provided password,
+          automatically migrate this user to a hashed password and return True.
         """
         try:
-            if ':' in (self.passwordHash or ''):
-                salt, stored_hash = self.passwordHash.split(':', 1)
+            ph = self.passwordHash or ''
+            if ':' in ph:
+                salt, stored_hash = ph.split(':', 1)
                 hash_obj = hashlib.pbkdf2_hmac(
                     'sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000
                 )
                 return hash_obj.hex() == stored_hash
-            # Plaintext fallback (temporary; for prototype only)
-            return self.passwordHash == password
+            # Plaintext stored: migrate on successful match
+            if ph == password:
+                try:
+                    self.set_password(password)
+                    # Avoid triggering full validation; save only the changed field
+                    self.save()
+                except Exception:
+                    # Even if migration fails, allow this login once
+                    pass
+                return True
+            return False
         except Exception:
             return False
     

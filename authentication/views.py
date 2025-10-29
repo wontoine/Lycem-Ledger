@@ -75,7 +75,8 @@ class LoginView(APIView):
                 "user": {
                     "userid": user.userid,
                     "username": user.username,
-                    "email": user.email,
+                    "email": getattr(user, 'email', None),
+                    "roleID": getattr(user, 'roleID', None),
                     "role": role_name,
                     "isEnabled": user.isEnabled,
                     "accountType": account_type,

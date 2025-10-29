@@ -6,6 +6,7 @@ class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
     email = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
     username = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
+    role = serializers.IntegerField(required=False)
     password = serializers.CharField(trim_whitespace=False)
 
     def validate(self, attrs):
