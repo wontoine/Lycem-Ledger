@@ -108,8 +108,8 @@ MONGODB_SETTINGS = {
     'authentication_source': os.environ.get('MONGODB_AUTH_SOURCE', os.environ.get('MONGODB_DB', 'admin')),
 }
 
-# Optional: prefer a full MongoDB URI to avoid special-character issues in passwords
-MONGODB_URI = os.environ.get('MONGODB_URI')
+
+MONGODB_URI = os.environ.get('MONGODB_URI', None)
 
 # Connect to MongoDB (with ping verification)
 try:
@@ -131,12 +131,6 @@ except Exception as e:
     print("App will continue but MongoDB features won't work")
 
 # Keep SQLite for Django's built-in features (admin, sessions, etc.)
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
 
 
 # Password validation

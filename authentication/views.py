@@ -46,12 +46,11 @@ class LoginView(APIView):
         identifier = serializer.validated_data["identifier"]
         password = serializer.validated_data["password"]
 
-        # Find user by email or username
+        # TEMP: Treat every identifier as a username while the
+        # database stabilizes and email is introduced later.
+        # When ready, restore email lookup with "@" detection.
         try:
-            if "@" in identifier:
-                user = User.objects(email=identifier).first()
-            else:
-                user = User.objects(username=identifier).first()
+            user = User.objects(username=identifier).first()
         except Exception as e:
             return Response({"approved": False, "error": "Database connection error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -25,7 +25,10 @@ class User(Document):
     """
     userid = IntField(required=True, unique=True)
     username = StringField(required=True, max_length=100)
-    email = StringField(required=True, unique=True, max_length=255)
+    # Temporarily make email optional and non-unique so the DB can
+    # contain users without emails while we finish wiring things up.
+    # We'll reintroduce uniqueness (likely sparse) when emails are present.
+    email = StringField(required=False, max_length=255)
     roleID = IntField(required=True)
     passwordHash = StringField(required=True, max_length=255)
     isEnabled = BooleanField(default=True)
