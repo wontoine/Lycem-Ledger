@@ -3,6 +3,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.contrib.auth.hashers import check_password
 from users.models import User, Role
 
 
@@ -21,32 +22,54 @@ class HelloWorldView(APIView):
 
 class LoginView(APIView):
     """
-    Login endpoint using MongoEngine User documents
+    Login endpoint using MongoEngine User documents.
+    Accepts either username or email for login.
     """
-    
+
     def post(self, request):
+        # Accept either 'username' or 'email' field
+        username = request.data.get('username')
         email = request.data.get('email')
         password = request.data.get('password')
         
-        if not email or not password:
-            return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+        # User must provide either username or email
+        if not (username or email):
+            return Response({
+                'error': 'Username or email is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Find user by email
+        if not password:
+            return Response({
+                'error': 'Password is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Find user by username or email
         try:
-            user = User.objects(email=email).first()
+            if username:
+                user = User.objects(username=username).first()
+            else:
+                user = User.objects(email=email).first()
         except Exception as e:
-            return Response({'error': 'Database connection error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({
+                'error': 'Database connection error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         if not user:
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({
+                'error': 'Invalid credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
         if not user.isEnabled:
-            return Response({'error': 'Account is disabled'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({
+                'error': 'Account is disabled'
+            }, status=status.HTTP_401_UNAUTHORIZED)
         
         # Check password
         if not user.check_password(password):
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-        
+            return Response({
+                'error': 'Invalid credentials'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
         return Response({
             'message': 'Login successful',
             'user': {
