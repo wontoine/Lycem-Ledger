@@ -15,3 +15,10 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError({"identifier": "Provide email or username."})
         attrs["identifier"] = ident
         return attrs
+
+
+class CreateAccountSerializer(serializers.Serializer):
+    email = serializers.EmailField(trim_whitespace=True)
+    username = serializers.CharField(trim_whitespace=True)
+    customerPlanID = serializers.IntegerField()
+    password = serializers.CharField(trim_whitespace=False)

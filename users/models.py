@@ -19,15 +19,50 @@ class Role(Document):
         return f"{self.RoleName} (ID: {self.roleID})"
 
 
+class Customer(Document):
+    """
+    Customer record used to validate policy number/email combos.
+    """
+    CustomerID = IntField(required=True, unique=True, db_field="customerID")
+    UserID = IntField(required=True, unique=True, db_field="userID")
+    Email = StringField(required=True, max_length=255, db_field="email")
+
+    meta = {
+        'collection': 'customers',
+        # Avoid auto-creating indexes to prevent conflicts with existing DB state.
+        'auto_create_index': False,
+        'strict': False,  # allow extra fields (address, phones, etc.) present in documents
+    }
+
+    def __str__(self):
+        return f"{self.Email} ({self.CustomerID})"
+
+
+class CustomerPlan(Document):
+    """
+    Minimal CustomerPlans document used during registration to map a
+    customerPlanID to the owning CustomerID.
+    """
+    CustomerPlanID = IntField(required=True, unique=True, db_field="CustomerPlanID")
+    CustomerID = IntField(required=True, db_field="CustomerID")
+
+    meta = {
+        'collection': 'customerPlans',
+        'auto_create_index': False,
+        'strict': False,  # tolerate extra plan fields such as StartDate, Status, etc.
+    }
+
+    def __str__(self):
+        return f"Plan {self.CustomerPlanID} -> Customer {self.CustomerID}"
+
+
 class User(Document):
     """
     User document matching your MongoDB users collection
     """
     userid = IntField(required=True, unique=True)
-    username = StringField(required=True, max_length=100)
-    # Temporarily make email optional and non-unique so the DB can
-    # contain users without emails while we finish wiring things up.
-    # We'll reintroduce uniqueness (likely sparse) when emails are present.
+    username = StringField(required=True, max_length=100, unique=True)
+    
     email = StringField(required=False, max_length=255)
     roleID = IntField(required=True)
     passwordHash = StringField(required=True, max_length=255)
@@ -35,7 +70,12 @@ class User(Document):
     
     meta = {
         'collection': 'users',
-        'indexes': ['userid', 'email', 'username']
+        # Use default MongoDB index names (e.g., userid_1) to avoid name conflicts
+        'indexes': [
+            {'fields': ['userid'], 'unique': True},
+            {'fields': ['username'], 'unique': True},
+            {'fields': ['email'], 'unique': True, 'sparse': True},
+        ],
     }
     
     def __str__(self):
@@ -86,7 +126,7 @@ class User(Document):
         Set password hash
         """
         self.passwordHash = self.hash_password(password)
-    
+
     @property
     def role_name(self):
         """
