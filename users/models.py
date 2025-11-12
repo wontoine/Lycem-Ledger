@@ -1,6 +1,6 @@
 from mongoengine import Document, StringField, IntField, BooleanField, ReferenceField
 import hashlib
-import secrets
+from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
 
 class Role(Document):
@@ -84,39 +84,54 @@ class User(Document):
     @classmethod
     def hash_password(cls, password):
         """
-        Hash password using a simple method (you can upgrade to bcrypt/argon2 later)
+        Hash password using Django's password hasher (Argon2 preferred via settings).
         """
-        salt = secrets.token_hex(16)
-        hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-        return f"{salt}:{hash_obj.hex()}"
+        return make_password(password)
     
     def check_password(self, password):
         """
         Check if provided password matches the stored hash.
 
-        Behavior:
-        - If `passwordHash` contains a colon, treat it as "salt:hexhash" (PBKDF2-SHA256) and compare.
-        - If `passwordHash` appears to be plaintext and matches the provided password,
-          automatically migrate this user to a hashed password and return True.
+        Behavior (priority order):
+        1) If `passwordHash` looks like a Django hash (argon2, pbkdf2_*, bcrypt, scrypt) -> verify with Django.
+        2) If `passwordHash` contains a colon -> treat it as legacy "salt:hexhash" (PBKDF2-SHA256) and compare.
+        3) If `passwordHash` appears to be plaintext and matches -> migrate to Django hasher and return True.
+        4) Otherwise -> False.
         """
         try:
             ph = self.passwordHash or ''
+
+            # 1) Django-managed hashes (argon2/pbkdf2_/bcrypt/scrypt)
+            if ph.startswith(('argon2', 'pbkdf2_', 'bcrypt', 'scrypt')):
+                return django_check_password(password, ph)
+
+            # 2) Legacy custom format: salt:hexhash (PBKDF2-SHA256)
             if ':' in ph:
                 salt, stored_hash = ph.split(':', 1)
                 hash_obj = hashlib.pbkdf2_hmac(
                     'sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000
                 )
-                return hash_obj.hex() == stored_hash
-            # Plaintext stored: migrate on successful match
+                if hash_obj.hex() == stored_hash:
+                    # On successful legacy match, migrate to Django hasher for future logins
+                    try:
+                        self.passwordHash = make_password(password)
+                        self.save()
+                    except Exception:
+                        pass
+                    return True
+                return False
+
+            # 3) Plaintext stored: migrate on successful match
             if ph == password:
                 try:
-                    self.set_password(password)
-                    # Avoid triggering full validation; save only the changed field
+                    self.passwordHash = make_password(password)
                     self.save()
                 except Exception:
                     # Even if migration fails, allow this login once
                     pass
                 return True
+
+            # 4) No match
             return False
         except Exception:
             return False

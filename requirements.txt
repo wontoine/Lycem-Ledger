@@ -5,3 +5,4 @@ python-dotenv==1.0.1
 sshtunnel==0.4.0
 # sshtunnel 0.4.0 expects Paramiko to expose DSSKey; pin to a compatible version
 paramiko<3.4
+argon2-cffi>=23.1.0
