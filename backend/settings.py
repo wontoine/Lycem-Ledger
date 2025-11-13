@@ -130,17 +130,7 @@ except Exception as e:
     print(f"⚠️ MongoDB connection failed: {e}")
     print("App will continue but MongoDB features won't work")
 
-# Keep SQLite for Django's built-in features (admin, sessions, etc.)
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
 
-
-# Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -157,10 +147,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Prefer Argon2 for hashing (Django-managed hashes)
-PASSWORD_HASHERS = [
-    'django.contrib.auth.hashers.Argon2PasswordHasher',
-]
 
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.Argon2PasswordHasher',
