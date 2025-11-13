@@ -1,11 +1,27 @@
-from mongoengine import Document, StringField, EmailField, IntField, BooleanField, ReferenceField
+from mongoengine import (
+    Document,
+    StringField,
+    IntField,
+    BooleanField,
+    ReferenceField,
+    DateTimeField,
+    ListField,
+    FloatField,
+    DictField,
+)
+import hashlib
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
-
+from datetime import datetime
 
 
 class Role(Document):
     """
-    Role document matching your MongoDB Roles collection
+    Defines user roles. This collection maps a numeric roleID to a name.
+
+    Example document:
+    { "roleID": 1, "RoleName": "admin" }
+    { "roleID": 2, "RoleName": "manager" }
+    { "roleID": 3, "RoleName": "agent" }
     """
     roleID = IntField(required=True, unique=True)
     RoleName = StringField(required=True, max_length=50)
@@ -21,7 +37,13 @@ class Role(Document):
 
 class Customer(Document):
     """
-    Customer record used to validate policy number/email combos.
+    Stores core customer data.
+    This links a unique CustomerID to the main UserID (from the 'users' collection)
+    and their email. The 'strict: False' setting allows other data
+    (like addresses) to exist in the document without causing errors.
+
+    Example document:
+    { "customerID": 1001, "userID": 50, "email": "customer@example.com", "address": "..." }
     """
     CustomerID = IntField(required=True, unique=True, db_field="customerID")
     UserID = IntField(required=True, unique=True, db_field="userID")
@@ -40,8 +62,11 @@ class Customer(Document):
 
 class CustomerPlan(Document):
     """
-    Minimal CustomerPlans document used during registration to map a
-    customerPlanID to the owning CustomerID.
+    Maps a specific insurance plan (CustomerPlanID) to its owner (CustomerID).
+    This is mainly used to verify ownership during registration or other checks.
+
+    Example document:
+    { "CustomerPlanID": 9001, "CustomerID": 1001, "Status": "active" }
     """
     CustomerPlanID = IntField(required=True, unique=True, db_field="CustomerPlanID")
     CustomerID = IntField(required=True, db_field="CustomerID")
@@ -49,7 +74,7 @@ class CustomerPlan(Document):
     meta = {
         'collection': 'customerPlans',
         'auto_create_index': False,
-        'strict': False,  # tolerate extra plan fields such as StartDate, Status, etc.
+        'strict': False,  # tolerate extra plan fields
     }
 
     def __str__(self):
@@ -58,15 +83,29 @@ class CustomerPlan(Document):
 
 class User(Document):
     """
-    User document matching your MongoDB users collection
+    Represents any user in the system (customers, agents, managers, etc.).
+    This collection stores login credentials (username, passwordHash),
+    their role (roleID), and their status (isEnabled).
+
+    Example document:
+    {
+      "userid": 77,
+      "username": "agent_bob",
+      "email": "agent@example.com",
+      "roleID": 3,
+      "managerID": 5,
+      "isEnabled": true,
+      "passwordHash": "argon2$..."
+    }
     """
     userid = IntField(required=True, unique=True)
     username = StringField(required=True, max_length=100, unique=True)
-    
+
     email = StringField(required=False, max_length=255)
     roleID = IntField(required=True)
     passwordHash = StringField(required=True, max_length=255)
     isEnabled = BooleanField(default=True)
+    managerID = IntField(required=False, null=True)
 
     meta = {
         'collection': 'users',
@@ -75,6 +114,7 @@ class User(Document):
             {'fields': ['userid'], 'unique': True},
             {'fields': ['username'], 'unique': True},
             {'fields': ['email'], 'unique': True, 'sparse': True},
+            {'fields': ['managerID'], 'sparse': True},
         ],
     }
 
@@ -90,15 +130,15 @@ class User(Document):
 
     def check_password(self, password):
         """
-        Check if provided password matches the stored hash.
+        Checks a given password against the stored hash.
 
-        Behavior (in priority order):
-        1. If passwordHash is Argon2/Django format -> verify with django_check_password
-        2. If passwordHash is plaintext and matches -> AUTO-MIGRATE to Argon2 and return True
-        3. Otherwise -> return False
+        This method handles multiple password formats for legacy compatibility:
+        1. Django hashes (argon2, pbkdf2, etc.): Verifies using Django's built-in checker.
+        2. Legacy "salt:hash" format: Manually hashes and compares.
+        3. Plaintext: Directly compares (for very old, unmigrated passwords).
 
-        This allows testing with plaintext passwords that get automatically upgraded
-        to Argon2 on first successful login.
+        If a legacy or plaintext password matches, it automatically
+        upgrades the hash to the modern Django format.
         """
         try:
             ph = self.passwordHash or ''
@@ -112,7 +152,6 @@ class User(Document):
             if ph == password:
                 print(f"Migrating plaintext password to Argon2 for user: {self.username}")
                 try:
-                    self.passwordHash = make_password(password)
                     self.passwordHash = make_password(password)
                     self.save()
                     print(f"Password migrated successfully for: {self.username}")
@@ -138,10 +177,156 @@ class User(Document):
     @property
     def role_name(self):
         """
-        Get role name from roleID
+        A helper property to get the user's role name (e.g., "admin")
+        by looking up their roleID in the Roles collection.
         """
         try:
             role = Role.objects(roleID=self.roleID).first()
             return role.RoleName if role else 'unknown'
         except:
             return 'unknown'
+
+
+class Item(Document):
+    """
+    Represents an item that can be insured or part of a claim.
+    Items can be generic catalog entries or, if CustomerID is set,
+    can belong to a specific customer.
+
+    Example document:
+    {
+      "ItemID": 10,
+      "Name": "MacBook Pro 16in",
+      "Description": "Silver, M3 Pro",
+      "Value": 2500.00,
+      "CustomerID": 1001
+    }
+    """
+    ItemID = IntField(required=True, unique=True)
+    Name = StringField(required=True, max_length=255)
+    Description = StringField(required=False)
+    CustomerID = IntField(required=False, null=True)
+    Value = FloatField(required=False)
+
+    meta = {
+        'collection': 'items',
+        'indexes': [
+            {'fields': ['ItemID'], 'unique': True},
+            {'fields': ['CustomerID'], 'sparse': True},
+        ],
+        'strict': False,
+    }
+
+
+class Policy(Document):
+    """
+    Represents an insurance policy.
+    Tracks the policy's status (e.g., 'pending', 'approved', 'rejected')
+    and links it to a customer.
+
+    Example document:
+    {
+      "PolicyID": 901,
+      "CustomerID": 1001,
+      "Status": "pending",
+      "CreatedAt": "2025-11-13T10:00:00Z",
+      "UpdatedAt": "2025-11-13T10:00:00Z"
+    }
+    """
+    PolicyID = IntField(required=True, unique=True)
+    CustomerID = IntField(required=True)
+    Status = StringField(required=True, choices=(
+        'pending', 'approved', 'rejected'
+    ), default='pending')
+    CreatedAt = DateTimeField(default=datetime.utcnow)
+    UpdatedAt = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        'collection': 'policies',
+        'indexes': [
+            {'fields': ['PolicyID'], 'unique': True},
+            {'fields': ['CustomerID']},
+            {'fields': ['Status']},
+        ],
+        'strict': False,
+    }
+
+
+class Claim(Document):
+    """
+    A claim submitted by a customer, typically assigned to an agent for review.
+    Tracks the claim's status, amount, and which items are involved.
+
+    Example document:
+    {
+      "ClaimID": 123,
+      "CustomerID": 1001,
+      "PolicyID": 901,
+      "AssignedToUserID": 77,
+      "Status": "submitted",
+      "Reason": "Water damage to laptop",
+      "Amount": 1500.00,
+      "ItemIDs": [10],
+      "CreatedAt": "2025-11-13T14:30:00Z",
+      "UpdatedAt": "2025-11-13T14:30:00Z"
+    }
+    """
+    ClaimID = IntField(required=True, unique=True)
+    CustomerID = IntField(required=True)
+    PolicyID = IntField(required=False, null=True)
+    AssignedToUserID = IntField(required=False, null=True)
+    Status = StringField(required=True, choices=(
+        'submitted', 'in_review', 'accepted', 'rejected'
+    ), default='submitted')
+    Reason = StringField(required=False)
+    Amount = FloatField(required=False)
+    ItemIDs = ListField(IntField(), default=list)
+    CreatedAt = DateTimeField(default=datetime.utcnow)
+    UpdatedAt = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        'collection': 'claims',
+        'indexes': [
+            {'fields': ['ClaimID'], 'unique': True},
+            {'fields': ['CustomerID']},
+            {'fields': ['AssignedToUserID'], 'sparse': True},
+            {'fields': ['Status']},
+        ],
+        'strict': False,
+    }
+
+
+class AuditLog(Document):
+    """
+    Logs sensitive actions performed by users for auditing purposes.
+    Records who (ActorUserID) did what (Action) to what (TargetType/TargetID).
+
+    Example document:
+    {
+      "LogID": 1678886400123,
+      "ActorUserID": 5,
+      "Action": "claim_approve",
+      "TargetType": "claim",
+      "TargetID": "123",
+      "Details": { "newStatus": "approved", "reason": "Valid." },
+      "CreatedAt": "2025-11-13T15:00:00Z"
+    }
+    """
+    LogID = IntField(required=True, unique=True)
+    ActorUserID = IntField(required=True)
+    Action = StringField(required=True)
+    TargetType = StringField(required=True)
+    TargetID = StringField(required=True)
+    Details = DictField(required=False)
+    CreatedAt = DateTimeField(default=datetime.utcnow)
+
+    meta = {
+        'collection': 'audit_logs',
+        'indexes': [
+            {'fields': ['LogID'], 'unique': True},
+            {'fields': ['ActorUserID']},
+            {'fields': ['TargetType']},
+            {'fields': ['CreatedAt']},
+        ],
+        'strict': False,
+    }

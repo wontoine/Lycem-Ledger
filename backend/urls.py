@@ -18,6 +18,20 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from . import views
+from .claims_views import (
+    AgentClaimsDashboard,
+    ClaimDetailView,
+    ClaimDecisionView,
+    ClaimListCreateView,
+    ManagerEmployeesView,
+    ManagerPendingPoliciesView,
+    ManagerPolicyDecisionView,
+    AdminAuditLogView,
+    ItemListCreateView,
+    ItemDetailView,
+    PolicyListCreateView,
+    PolicyDetailView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -25,4 +39,20 @@ urlpatterns = [
     # Authentication routes handled by the authentication app
     path("api/auth/", include("authentication.urls")),
     path("api/health/", views.HealthCheckView.as_view(), name="health"),
+    # Claims and management endpoints
+    # Claims CRUD
+    path("api/claims/", ClaimListCreateView.as_view(), name="claims-list-create"),
+    path("api/agent/claims/", AgentClaimsDashboard.as_view(), name="agent-claims"),
+    path("api/claims/<int:claim_id>/", ClaimDetailView.as_view(), name="claim-detail"),
+    path("api/claims/<int:claim_id>/decision/", ClaimDecisionView.as_view(), name="claim-decision"),
+    # Items CRUD
+    path("api/items/", ItemListCreateView.as_view(), name="items-list-create"),
+    path("api/items/<int:item_id>/", ItemDetailView.as_view(), name="item-detail"),
+    # Policies CRUD + manager approval endpoints
+    path("api/policies/", PolicyListCreateView.as_view(), name="policies-list-create"),
+    path("api/policies/<int:policy_id>/", PolicyDetailView.as_view(), name="policy-detail"),
+    path("api/manager/employees/", ManagerEmployeesView.as_view(), name="manager-employees"),
+    path("api/manager/policies/", ManagerPendingPoliciesView.as_view(), name="manager-policies"),
+    path("api/manager/policies/<int:policy_id>/decision/", ManagerPolicyDecisionView.as_view(), name="manager-policy-decision"),
+    path("api/admin/audit-logs/", AdminAuditLogView.as_view(), name="admin-audit-logs"),
 ]
