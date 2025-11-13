@@ -157,6 +157,10 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Prefer Argon2 for hashing (Django-managed hashes)
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+]
 
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.Argon2PasswordHasher',

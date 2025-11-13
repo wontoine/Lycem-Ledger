@@ -113,6 +113,7 @@ class User(Document):
                 print(f"Migrating plaintext password to Argon2 for user: {self.username}")
                 try:
                     self.passwordHash = make_password(password)
+                    self.passwordHash = make_password(password)
                     self.save()
                     print(f"Password migrated successfully for: {self.username}")
                 except Exception as e:
