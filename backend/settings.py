@@ -131,6 +131,12 @@ except Exception as e:
     print("App will continue but MongoDB features won't work")
 
 # Keep SQLite for Django's built-in features (admin, sessions, etc.)
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
+}
 
 
 # Password validation

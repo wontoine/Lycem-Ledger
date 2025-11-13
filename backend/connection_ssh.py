@@ -123,7 +123,7 @@ def ensure_ssh_tunnel_if_enabled():
         _tunnel.start()
         atexit.register(stop_ssh_tunnel)
         print(
-            "SSH tunnel started: {local_host}:{local_port} -> {remote_host}:{remote_port} via {ssh_host}:{ssh_port}"
+            f"SSH tunnel started: {local_host}:{local_port} -> {remote_host}:{remote_port} via {ssh_host}:{ssh_port}"
         )
         return _tunnel
     except Exception as e:
