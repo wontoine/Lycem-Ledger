@@ -38,7 +38,11 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-do-not-use")
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
 # Allow both local development and Turing server
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'turing.cs.olemiss.edu']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'turing.cs.olemiss.edu',]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+]
 
 
 # Application definition
@@ -53,8 +57,10 @@ INSTALLED_APPS = [
     "rest_framework",
     "authentication",
     "users",
+    "corsheaders",
 ]
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -130,6 +136,13 @@ except Exception as e:
     print(f"⚠️ MongoDB connection failed: {e}")
     print("App will continue but MongoDB features won't work")
 
+# Keep SQLite for Django's built-in features (admin, sessions, etc.)
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
+}
 
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -186,6 +199,28 @@ REST_FRAMEWORK = {
 
 # Company domain configuration (used to classify employee vs. customer)
 COMPANY_EMAIL_DOMAIN = os.environ.get("COMPANY_EMAIL_DOMAIN", "lyceum-ledgers.com")
+
+# Email (SMTP) configuration
+# These should be set via environment variables or a local .env file.
+# Example for Gmail (App Password required):
+# EMAIL_HOST=smtp.gmail.com
+# EMAIL_PORT=587
+# EMAIL_USE_TLS=True
+# EMAIL_HOST_USER=your_account@gmail.com
+# EMAIL_HOST_PASSWORD=your_app_password
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes", "on")
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() in ("1", "true", "yes", "on")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@lyceum-ledgers.com")
+
+# Base URL for password reset links sent to users.
+# If you have a frontend, set this to something like
+# https://app.example.com/reset-password?token=
+PASSWORD_RESET_BASE_URL = os.environ.get("PASSWORD_RESET_BASE_URL", "")
 
 # For production deployment on Turing server (turing.cs.olemiss.edu)
 # You'll need to update these when deploying:

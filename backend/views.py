@@ -4,7 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.hashers import check_password
-from users.models import User, Role
+from users.models import User, Role, Customer
 
 
 class HelloWorldView(APIView):
@@ -43,12 +43,28 @@ class LoginView(APIView):
                 'error': 'Password is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Find user by username or email
+        # Find user by username or by customer email (authoritative)
         try:
+            user = None
+            cust_email = None
             if username:
                 user = User.objects(username=username).first()
+                if user:
+                    try:
+                        cust = Customer.objects(UserID=user.userid).first()
+                        if cust:
+                            cust_email = getattr(cust, 'Email', None)
+                    except Exception:
+                        cust_email = None
             else:
-                user = User.objects(email=email).first()
+                # Look up customer by email, then map to user via UserID
+                try:
+                    cust = Customer.objects(__raw__={"email": {"$regex": f"^{email}$", "$options": "i"}}).first()
+                except Exception:
+                    cust = None
+                if cust:
+                    cust_email = getattr(cust, 'Email', None)
+                    user = User.objects(userid=getattr(cust, 'UserID', None)).first()
         except Exception as e:
             return Response({
                 'error': 'Database connection error'
@@ -75,7 +91,7 @@ class LoginView(APIView):
             'user': {
                 'userid': user.userid,
                 'username': user.username,
-                'email': user.email,
+                'email': cust_email,
                 'role': user.role_name,
                 'isEnabled': user.isEnabled
             }

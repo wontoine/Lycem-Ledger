@@ -11,7 +11,9 @@ from mongoengine import (
 )
 import hashlib
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
+import secrets
 
 
 class Role(Document):
@@ -101,11 +103,16 @@ class User(Document):
     userid = IntField(required=True, unique=True)
     username = StringField(required=True, max_length=100, unique=True)
 
+    # Note: email is stored in the customers collection, not here.
+    # Field retained for backward compatibility but should not be relied upon.
     email = StringField(required=False, max_length=255)
     roleID = IntField(required=True)
     passwordHash = StringField(required=True, max_length=255)
     isEnabled = BooleanField(default=True)
     managerID = IntField(required=False, null=True)
+    # Password reset support
+    resetToken = StringField(required=False, max_length=200, null=True)
+    resetTokenExpiresAt = DateTimeField(required=False, null=True)
 
     meta = {
         'collection': 'users',
@@ -113,13 +120,14 @@ class User(Document):
         'indexes': [
             {'fields': ['userid'], 'unique': True},
             {'fields': ['username'], 'unique': True},
-            {'fields': ['email'], 'unique': True, 'sparse': True},
+            # Do not index email here; authoritative email lives in customers
+            # {'fields': ['email'], 'unique': True, 'sparse': True},
             {'fields': ['managerID'], 'sparse': True},
         ],
     }
 
     def __str__(self):
-        return f"{self.username} ({self.email})"
+        return f"{self.username}"
 
     @classmethod
     def hash_password(cls, password):
@@ -173,6 +181,45 @@ class User(Document):
         Use this when creating new users or updating passwords.
         """
         self.passwordHash = self.hash_password(password)
+        # Invalidate any existing reset token once password is changed
+        self.resetToken = None
+        self.resetTokenExpiresAt = None
+
+    # ---- Password reset helpers ----
+    def issue_reset_token(self, ttl_minutes: int = 60) -> str:
+        """
+        Generate a secure token and set an expiry time.
+        Returns the token.
+        """
+        token = secrets.token_urlsafe(32)
+        expires_at = timezone.now() + timedelta(minutes=ttl_minutes)
+        self.resetToken = token
+        # Store as naive UTC to be safe with MongoEngine; convert to naive UTC if timezone-aware
+        if timezone.is_aware(expires_at):
+            expires_at = expires_at.replace(tzinfo=None)
+        self.resetTokenExpiresAt = expires_at
+        self.save()
+        return token
+
+    def clear_reset_token(self):
+        self.resetToken = None
+        self.resetTokenExpiresAt = None
+        self.save()
+
+    def is_reset_token_valid(self, token: str) -> bool:
+        if not token or not self.resetToken or token != self.resetToken:
+            return False
+        try:
+            expires = self.resetTokenExpiresAt
+            if expires is None:
+                return False
+            # Compare with current UTC naive time
+            now = timezone.now()
+            if timezone.is_aware(now):
+                now = now.replace(tzinfo=None)
+            return now <= expires
+        except Exception:
+            return False
 
     @property
     def role_name(self):

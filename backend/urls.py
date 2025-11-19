@@ -38,6 +38,8 @@ urlpatterns = [
     path("api/hello/", views.HelloWorldView.as_view(), name="hello"),
     # Authentication routes handled by the authentication app
     path("api/auth/", include("authentication.urls")),
+    # Alias without the /api prefix to support clients using /auth/... endpoints
+    path("auth/", include("authentication.urls")),
     path("api/health/", views.HealthCheckView.as_view(), name="health"),
     # Claims and management endpoints
     # Claims CRUD
