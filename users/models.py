@@ -129,6 +129,35 @@ class User(Document):
     def __str__(self):
         return f"{self.username}"
 
+    # ---- Role linking helpers ----
+    @property
+    def role(self):
+        """
+        Returns the Role document linked to this user via roleID.
+        If no matching role is found, returns None.
+        """
+        try:
+            return Role.objects(roleID=self.roleID).first()
+        except Exception:
+            return None
+
+    def set_role(self, role_or_id):
+        """
+        Convenience setter to assign role by Role document or numeric ID.
+
+        Examples:
+        - user.set_role(3)
+        - user.set_role(Role.objects(roleID=3).first())
+        """
+        if role_or_id is None:
+            self.roleID = None
+            return
+        if isinstance(role_or_id, Role):
+            self.roleID = role_or_id.roleID
+        else:
+            # Assume it's an int-like ID
+            self.roleID = int(role_or_id)
+
     @classmethod
     def hash_password(cls, password):
         """
@@ -228,10 +257,27 @@ class User(Document):
         by looking up their roleID in the Roles collection.
         """
         try:
-            role = Role.objects(roleID=self.roleID).first()
+            role = self.role
             return role.RoleName if role else 'unknown'
-        except:
+        except Exception:
             return 'unknown'
+
+    @property
+    def role_dict(self):
+        """
+        Small dict useful for serialization.
+        Provides both the legacy "RoleName" field and the preferred
+        lowercase "role" for the role's name.
+        Example: {"roleID": 3, "role": "agent", "RoleName": "agent"}
+        """
+        r = self.role
+        return {
+            "roleID": self.roleID,
+            # Preferred key for JSON responses
+            "role": getattr(r, "RoleName", None) if r else None,
+            # Legacy key kept for backward compatibility
+            "RoleName": getattr(r, "RoleName", None) if r else None,
+        }
 
 
 class Item(Document):

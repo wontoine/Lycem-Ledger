@@ -46,7 +46,13 @@ except Exception as e:
 try:
     user = User.objects(email='test@example.com').first()
     if user and user.check_password('testpassword123'):
-        print(f"Login test successful! User: {user.username}, Role: {user.role_name}")
+        linked_role = user.role  # Uses roleID to fetch Role document
+        rn = user.role_name
+        print(f"Login test successful! User: {user.username}, Role: {rn}")
+        if linked_role:
+            print(f"Role linkage OK: roleID={user.roleID} -> RoleName={linked_role.RoleName}")
+        else:
+            print(f"Role linkage missing for roleID={user.roleID}")
     else:
         print("Login test failed")
 except Exception as e:
