@@ -1,0 +1,255 @@
+ssh group3f25@turing.cs.olemiss.edu
+
+mongosh "mongodb://127.0.0.1:27017" --username group3f25 --authenticationDatabase group3f25_db
+
+use group3f25_db
+
+// --- Clear Existing Data (Optional) ---
+// Run these commands if you want to start fresh each time.
+db.roles.deleteMany({});
+db.users.deleteMany({});
+db.teams.deleteMany({});
+db.agents.deleteMany({});
+db.supervisors.deleteMany({});
+db.customers.deleteMany({});
+db.insurancePlans.deleteMany({});
+db.customerPlans.deleteMany({});
+db.items.deleteMany({});
+db.claimStatus.deleteMany({});
+db.claimedItems.deleteMany({});
+db.claimWorkflowHistory.deleteMany({});
+db.communicationLog.deleteMany({});
+db.itemDocuments.deleteMany({});
+
+// --- 1. Roles (Lookup Table) ---
+// Defining roles for different user types.
+db.roles.insertMany([
+  { roleID: 1, RoleName: "Customer" },
+  { roleID: 2, RoleName: "Agent" },
+  { roleID: 3, RoleName: "Supervisor" },
+  { roleID: 4, RoleName: "Admin" }
+]);
+
+// --- 2. Users ---
+// Creating users that will be linked to customers, agents, and supervisors.
+db.users.insertMany([
+  { userid: 1, username: "john.doe", roleID: 1, passwordHash: "hash_customer1", isEnabled: true },
+  { userid: 2, username: "jane.smith", roleID: 2, passwordHash: "hash_agent1", isEnabled: true },
+  { userid: 3, username: "alice.mgr", roleID: 3, passwordHash: "hash_supervisor1", isEnabled: true },
+  { userid: 4, username: "admin_user", roleID: 4, passwordHash: "hash_admin", isEnabled: true },
+  { userid: 5, username: "bob.client", roleID: 1, passwordHash: "hash_customer2", isEnabled: true }
+]);
+
+// --- 3. Teams ---
+// Creating teams for agents and supervisors.
+db.teams.insertMany([
+  { TeamID: 1, TeamName: "Alpha Claims Team" },
+  { TeamID: 2, TeamName: "Bravo Support Team" }
+]);
+
+// --- 4. Agents ---
+// Linking to Users (userid: 2) and Teams (TeamID: 1).
+db.agents.insertMany([
+  { agentID: 1, firstname: "Jane", lastName: "Smith", email: "jane.smith@company.com", phone: 5551111, userID: 2, TeamID: 1 }
+]);
+
+// --- 5. Supervisors ---
+// Linking to Users (userid: 3) and Teams (TeamID: 1).
+db.supervisors.insertMany([
+  { SupervisorID: 1, userID: 3, firstname: "Alice", lastName: "Manager", email: "alice.mgr@company.com", phone: 5552222, TeamID: 1 }
+]);
+
+// --- 6. Customers ---
+// Linking to Users (userid: 1, 5) and Agents (assignment: 1).
+db.customers.insertMany([
+  { 
+    customerID: 1, 
+    userID: 1, 
+    Street: "123 Main St", 
+    city: "Anytown", 
+    State: "TX", 
+    zipcode: 12345, 
+    homephone: 5553333, 
+    ss: 123456789, 
+    cellphone: 5554444, 
+    workphone: 5555555, 
+    email: "john.doe@email.com", 
+    dob: new Date("1990-05-15"), 
+    assignment: 1 // Assigned to Agent Jane Smith (agentID: 1)
+  },
+  { 
+    customerID: 2, 
+    userID: 5, 
+    Street: "456 Oak Ave", 
+    city: "Otherville", 
+    State: "CA", 
+    zipcode: 67890, 
+    homephone: 5556666, 
+    ss: 987654321, 
+    cellphone: 5557777, 
+    workphone: 5558888, 
+    email: "bob.client@email.com", 
+    dob: new Date("1985-10-20"), 
+    assignment: 1 // Also assigned to Agent Jane Smith (agentID: 1)
+  }
+]);
+
+// --- 7. InsurancePlans ---
+// Defines available home insurance products.
+db.insurancePlans.insertMany([
+  { planID: 1, PlanName: "Basic Home", Description: "Basic coverage for home structure and liability.", CoverageLim: 100000, BasePrice: 500 },
+  { planID: 2, PlanName: "Premium Home", Description: "Comprehensive home and contents coverage.", CoverageLim: 500000, BasePrice: 1200 }
+]);
+
+// --- 8. CustomerPlans ---
+// Links Customers to their active InsurancePlans.
+db.customerPlans.insertMany([
+  { 
+    CustomerPlanID: 1, 
+    CustomerID: 1, // John Doe
+    StartDate: new Date("2024-01-01T00:00:00Z"), 
+    EndDate: new Date("2025-01-01T00:00:00Z"), 
+    CurrentPremium: 500, 
+    Status: "Active", 
+    planID: 1 // Basic Home
+  },
+  { 
+    CustomerPlanID: 2, 
+    CustomerID: 2, // Bob Client
+    StartDate: new Date("2023-06-01T00:00:00Z"), 
+    EndDate: new Date("2024-06-01T00:00:00Z"), 
+    CurrentPremium: 1200, 
+    Status: "Active", 
+    planID: 2 // Premium Home
+  }
+]);
+
+// --- 9. Items ---
+// Valuables owned by customers, kept inside the home.
+// Note: Using NumberDecimal for currency/decimal types.
+db.items.insertMany([
+  { 
+    ItemID: 1, 
+    CustomerID: 1, // John Doe
+    description: "15-inch laptop", 
+    name: "Laptop", 
+    Category: "Electronics", 
+    PurchaseDate: new Date("2023-03-10"), 
+    PurchaseValue: NumberDecimal("1200.00"), 
+    CurrentEstimatedV: NumberDecimal("1000.00") 
+  },
+  { 
+    ItemID: 2, 
+    CustomerID: 1, // John Doe
+    description: "Diamond engagement ring", 
+    name: "Ring", 
+    Category: "Jewelry", 
+    PurchaseDate: new Date("2020-07-22"), 
+    PurchaseValue: NumberDecimal("5000.00"), 
+    CurrentEstimatedV: NumberDecimal("5500.00") 
+  },
+  { 
+    ItemID: 3, 
+    CustomerID: 2, // Bob Client
+    description: "Antique grandfather clock", 
+    name: "Clock", 
+    Category: "Antiques", 
+    PurchaseDate: new Date("2010-02-01"), 
+    PurchaseValue: NumberDecimal("3000.00"), 
+    CurrentEstimatedV: NumberDecimal("4500.00") 
+  }
+]);
+
+// --- 10. ItemDocuments ---
+// Documents related to an item (e.g., receipts, appraisals).
+db.itemDocuments.insertMany([
+  { DocumentID: 1, ItemID: 1, DocumentType: "Receipt", StoragePath: "/docs/receipt_laptop.pdf", UploadDate: new Date("2023-03-10T10:00:00Z") },
+  { DocumentID: 2, ItemID: 2, DocumentType: "Appraisal", StoragePath: "/docs/appraisal_ring.pdf", UploadDate: new Date("2020-07-25T15:00:00Z") },
+  { DocumentID: 3, ItemID: 3, DocumentType: "Certificate of Authenticity", StoragePath: "/docs/coa_clock.pdf", UploadDate: new Date("2010-02-01T12:00:00Z") }
+]);
+
+// --- 11. ClaimStatus (Lookup Table) ---
+// Defines the possible statuses for a claim.
+db.claimStatus.insertMany([
+  { CurrentStatusID: 1, StatusName: "Filed", Description: "Claim has been filed by the customer." },
+  { CurrentStatusID: 2, StatusName: "In Review", Description: "Claim is being reviewed by an agent." },
+  { CurrentStatusID: 3, StatusName: "Approved", Description: "Claim has been approved." },
+  { CurrentStatusID: 4, StatusName: "Denied", Description: "Claim has been denied." }
+]);
+
+// --- 12. ClaimedItems ---
+// This is the main claim record, linking an Item to a loss event.
+db.claimedItems.insertMany([
+  { 
+    ClaimID: 1, 
+    ItemID: 1, // John Doe's Laptop
+    CurrentStatusID: 1, // Filed
+    LossDate: new Date("2024-10-20"), 
+    ClaimedValueAtTime: NumberDecimal("1000.00"), 
+    descriptionOfLoss: "Stolen during a home break-in.", 
+    DateFiled: new Date("2024-10-21") 
+  }
+]);
+
+// --- 13. ClaimWorkflowHistory ---
+// A log of all actions taken on a claim.
+db.claimWorkflowHistory.insertMany([
+  { 
+    HistoryID: 1, 
+    ClaimID: 1, 
+    status: "Filed", 
+    EmployeeName: "john.doe", // Customer username
+    Timestamp: new Date("2024-10-21T09:00:00Z"), 
+    Note: "Initial claim submission by customer." 
+  },
+  { 
+    HistoryID: 2, 
+    ClaimID: 1, 
+    status: "In Review", 
+    EmployeeName: "jane.smith", // Agent username
+    Timestamp: new Date("2024-10-22T14:30:00Z"), 
+    Note: "Assigned to agent for review." 
+  }
+]);
+
+// --- 14. CommunicationLog ---
+// Log of communications with a customer.
+db.communicationLog.insertMany([
+  { 
+    MessageID: 1, 
+    customerID: 1, // John Doe
+    MessageText: "I need to file a claim for my laptop that was stolen from my house.", 
+    Timestamp: new Date("2024-10-21T08:30:00Z"), 
+    IsEscalated: false 
+  },
+  { 
+    MessageID: 2, 
+    customerID: 1, // John Doe
+    MessageText: "Agent Jane Smith speaking, I am reviewing your claim now.", 
+    Timestamp: new Date("2024-10-22T14:31:00Z"), 
+    IsEscalated: false 
+  }
+]);
+
+// --- Verification (Optional) ---
+// Run these to see the inserted data.
+print("--- Roles ---");
+db.roles.find().forEach(printjson);
+print("--- Users ---");
+db.users.find().forEach(printjson);
+print("--- Customers ---");
+db.customers.find().forEach(printjson);
+print("--- Agents ---");
+db.agents.find().forEach(printjson);
+print("--- Items (Valuables) ---");
+db.items.find().forEach(printjson);
+print("--- Claims ---");
+db.claimedItems.find().forEach(printjson);
+print("--- Claim History ---");
+db.claimWorkflowHistory.find().forEach(printjson);
+
+
+
+
+
+ 
