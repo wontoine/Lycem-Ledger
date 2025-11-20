@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from users.models import User, Claim, Item, Policy, AuditLog
+from users.models import User, Claim, Item, Policy, AuditLog, Customer
 from datetime import datetime
 
 
@@ -18,11 +18,20 @@ def _new_log_id() -> int:
 
 def _current_user(request):
     """
-    Identifies the current user from the 'X-User-ID' header.
+    Identifies the current user from the 'userid' header.
     Returns a User object or None if not found or on error.
+
+    Backward compatibility: still accepts legacy 'X-User-ID' if present.
     """
     try:
-        uid = request.headers.get("X-User-ID") or request.META.get("HTTP_X_USER_ID")
+        # Preferred new header name
+        uid = (
+            request.headers.get("userid")
+            or request.META.get("HTTP_USERID")
+            # Legacy support
+            or request.headers.get("X-User-ID")
+            or request.META.get("HTTP_X_USER_ID")
+        )
         if not uid:
             return None
         user = User.objects(userid=int(uid)).first()
@@ -33,19 +42,19 @@ def _current_user(request):
 
 def _require_user(request):
     """
-    Ensures a valid and enabled user is authenticated via the 'X-User-ID' header.
+    Ensures a valid and enabled user is authenticated via the 'userid' header.
     Returns (user, None) on success.
     Returns (None, Response) on failure.
 
     Failure JSON Output (401 Unauthorized):
-    {"error": "Unauthorized: missing or invalid X-User-ID"}
+    {"error": "Unauthorized: missing or invalid userid"}
 
     Failure JSON Output (403 Forbidden):
     {"error": "Account disabled"}
     """
     user = _current_user(request)
     if not user:
-        return None, Response({"error": "Unauthorized: missing or invalid X-User-ID"},
+        return None, Response({"error": "Unauthorized: missing or invalid userid"},
                               status=status.HTTP_401_UNAUTHORIZED)
     if not user.isEnabled:
         return None, Response({"error": "Account disabled"}, status=status.HTTP_403_FORBIDDEN)
@@ -67,6 +76,52 @@ def _is_agent(user: User) -> bool:
     """Checks if the user has an 'agent', 'employee', 'manager', 'admin', or 'superuser' role."""
     role = (user.role_name or "").lower()
     return role in ("agent", "employee", "manager", "admin", "superuser")
+
+
+# ---- RoleID-based access helpers (authoritative) ----
+def _has_full_access(user: User) -> bool:
+    """RoleIDs 3 and 4 can access all information (read)."""
+    try:
+        return int(getattr(user, "roleID", 0)) in (3, 4)
+    except Exception:
+        return False
+
+
+def _is_assigned_clients_only(user: User) -> bool:
+    """RoleID 2 can access information of their assigned clients (read)."""
+    try:
+        return int(getattr(user, "roleID", 0)) == 2
+    except Exception:
+        return False
+
+
+def _is_self_only(user: User) -> bool:
+    """RoleID 1 can access only their own policies and information (read)."""
+    try:
+        return int(getattr(user, "roleID", 0)) == 1
+    except Exception:
+        return False
+
+
+def _own_customer_ids(user: User):
+    """Return a set of CustomerID(s) owned by this user (via customers.UserID == user.userid)."""
+    try:
+        custs = Customer.objects(UserID=user.userid)
+        return {c.CustomerID for c in custs}
+    except Exception:
+        return set()
+
+
+def _assigned_customer_ids(user: User):
+    """
+    Return a set of CustomerID(s) assigned to this user. We infer assignment via
+    Claim.AssignedToUserID == user.userid.
+    """
+    try:
+        claims = Claim.objects(AssignedToUserID=user.userid)
+        return {c.CustomerID for c in claims}
+    except Exception:
+        return set()
 
 
 class AgentClaimsDashboard(APIView):
