@@ -23,6 +23,8 @@ from .claims_views import (
     ClaimDetailView,
     ClaimDecisionView,
     ClaimListCreateView,
+    SupervisorClaimsReviewList,
+    SupervisorClaimDecisionView,
     ManagerEmployeesView,
     ManagerPendingPoliciesView,
     ManagerPolicyDecisionView,
@@ -47,6 +49,9 @@ urlpatterns = [
     path("api/agent/claims/", AgentClaimsDashboard.as_view(), name="agent-claims"),
     path("api/claims/<int:claim_id>/", ClaimDetailView.as_view(), name="claim-detail"),
     path("api/claims/<int:claim_id>/decision/", ClaimDecisionView.as_view(), name="claim-decision"),
+    # Supervisor review endpoints
+    path("api/supervisor/claims/", SupervisorClaimsReviewList.as_view(), name="supervisor-claims"),
+    path("api/supervisor/claims/<int:claim_id>/decision/", SupervisorClaimDecisionView.as_view(), name="supervisor-claim-decision"),
     # Items CRUD
     path("api/items/", ItemListCreateView.as_view(), name="items-list-create"),
     path("api/items/<int:item_id>/", ItemDetailView.as_view(), name="item-detail"),
@@ -55,6 +60,7 @@ urlpatterns = [
     path("api/policies/<int:policy_id>/", PolicyDetailView.as_view(), name="policy-detail"),
     path("api/manager/employees/", ManagerEmployeesView.as_view(), name="manager-employees"),
     path("api/manager/policies/", ManagerPendingPoliciesView.as_view(), name="manager-policies"),
+    path("api/manager/policies/pending/", ManagerPendingPoliciesView.as_view(), name="manager-policies-pending"),
     path("api/manager/policies/<int:policy_id>/decision/", ManagerPolicyDecisionView.as_view(), name="manager-policy-decision"),
     path("api/admin/audit-logs/", AdminAuditLogView.as_view(), name="admin-audit-logs"),
 ]

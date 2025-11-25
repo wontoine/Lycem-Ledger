@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from corsheaders.defaults import default_headers
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -40,9 +41,35 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes", "
 # Allow both local development and Turing server
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'turing.cs.olemiss.edu',]
 
+# CORS configuration for local dev (Vite may use 5173 or 5174)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
 ]
+
+# If using cookies/session auth from the browser, enable credentials and trust CSRF origins
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+]
+
+
+# Allow custom headers used by the frontend (e.g., x-user-id) in CORS preflight
+# This fixes: "Request header field x-user-id is not allowed by Access-Control-Allow-Headers"
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-user-id",
+]
+
+
+# During local development, ensure CORS headers are always added
+# This helps avoid "No 'Access-Control-Allow-Origin' header" issues while debugging
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
 
 
 # Application definition
