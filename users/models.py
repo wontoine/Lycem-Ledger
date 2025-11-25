@@ -20,10 +20,11 @@ class Role(Document):
     """
     Defines user roles. This collection maps a numeric roleID to a name.
 
-    Example document:
-    { "roleID": 1, "RoleName": "admin" }
-    { "roleID": 2, "RoleName": "manager" }
-    { "roleID": 3, "RoleName": "agent" }
+    Current lookup table:
+    - 1 -> Customer
+    - 2 -> Agent  (note: Agent is treated the same as Manager in access control)
+    - 3 -> Supervisor
+    - 4 -> Admin
     """
     roleID = IntField(required=True, unique=True)
     RoleName = StringField(required=True, max_length=50)
@@ -94,7 +95,7 @@ class User(Document):
       "userid": 77,
       "username": "agent_bob",
       "email": "agent@example.com",
-      "roleID": 3,
+      "roleID": 2,  # Agent (equivalent to Manager for permissions)
       "managerID": 5,
       "isEnabled": true,
       "passwordHash": "argon2$..."

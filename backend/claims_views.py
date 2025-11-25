@@ -86,8 +86,17 @@ def _is_manager(user: User) -> bool:
     Input: User object
     Output: True/False
     """
+    # Accept either by resolved role name OR by numeric roleID == 2
+    try:
+        role_id = int(getattr(user, "roleID", 0))
+    except Exception:
+        role_id = 0
+    if role_id == 2:
+        return True
+
     role = (user.role_name or "").lower()
-    return role in ("manager", "admin", "superuser")
+    # Treat "agent" as equivalent to manager per spec
+    return role in ("agent", "manager", "admin", "superuser")
 
 
 def _is_agent(user: User) -> bool:
@@ -552,6 +561,57 @@ class ManagerEmployeesView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class ManagerPoliciesView(APIView):
+    """
+    Shows a manager all policies they are responsible for (i.e., policies for
+    customers whose claims are currently handled by the manager's direct reports).
+
+    GET:
+    - Input: None.
+    - Output (200): All policies within the manager's scope.
+      { "policies": [...] }
+    Notes:
+    - Admins see all policies.
+    """
+
+    def get(self, request):
+        user, err = _require_user(request)
+        if err:
+            return err
+        if not _is_manager(user):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            query = {}
+            # Admins/superusers: see everything
+            if not _is_admin(user):
+                # Determine manager scope: direct reports -> their assigned claims -> customer IDs
+                employee_ids = [u.userid for u in User.objects(managerID=user.userid)]
+                if employee_ids:
+                    cust_ids = {c.CustomerID for c in Claim.objects(AssignedToUserID__in=employee_ids)}
+                else:
+                    cust_ids = set()
+
+                if not cust_ids:
+                    return Response({"policies": []}, status=status.HTTP_200_OK)
+                query["CustomerID__in"] = list(cust_ids)
+
+            policies = Policy.objects(**query)
+            data = [
+                {
+                    "PolicyID": p.PolicyID,
+                    "CustomerID": p.CustomerID,
+                    "Status": p.Status,
+                    "CreatedAt": p.CreatedAt,
+                    "UpdatedAt": getattr(p, "UpdatedAt", None),
+                }
+                for p in policies
+            ]
+            return Response({"policies": data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class ManagerPendingPoliciesView(APIView):
     """
     Shows a manager all new policies that are waiting to be signed off.
@@ -570,7 +630,20 @@ class ManagerPendingPoliciesView(APIView):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            policies = Policy.objects(Status="pending")
+            # Admins: see all pending
+            if _is_admin(user):
+                policies = Policy.objects(Status="pending")
+            else:
+                # Scope to manager's team customers
+                employee_ids = [u.userid for u in User.objects(managerID=user.userid)]
+                if employee_ids:
+                    cust_ids = {c.CustomerID for c in Claim.objects(AssignedToUserID__in=employee_ids)}
+                else:
+                    cust_ids = set()
+
+                if not cust_ids:
+                    return Response({"policies": []}, status=status.HTTP_200_OK)
+                policies = Policy.objects(CustomerID__in=list(cust_ids), Status="pending")
             data = [
                 {
                     "PolicyID": p.PolicyID,
