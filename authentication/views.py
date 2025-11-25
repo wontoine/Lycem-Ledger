@@ -518,6 +518,85 @@ class ForgotPasswordView(APIView):
         return Response({"message": "If an account exists, an email has been sent."}, status=status.HTTP_200_OK)
 
 
+class CustomerPlansView(APIView):
+    """
+    Return all plans for the customer associated with a given userID.
+    """
+
+    def get(self, request):
+        user_id_raw = request.query_params.get("userID")
+        if not user_id_raw:
+            return Response({"error": "userID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user_id = int(user_id_raw)
+        except ValueError:
+            return Response({"error": "userID must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Resolve customer by userID
+        try:
+            customer = Customer.objects(UserID=user_id).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not customer:
+            return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Fetch plans for this customer
+        try:
+            plans = CustomerPlan.objects(CustomerID=customer.CustomerID)
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        def _get(plan, *keys):
+            """
+            Safely pull a value from a MongoEngine document that may have
+            varying field names/casing or be present only in _data because
+            the model doesn't declare the field.
+            """
+            for k in keys:
+                # direct attribute
+                val = getattr(plan, k, None)
+                if val is not None:
+                    return val
+                # raw data fallback when strict=False
+                if hasattr(plan, "_data") and k in plan._data:
+                    val = plan._data.get(k)
+                    if val is not None:
+                        return val
+            return None
+
+        def _plan_to_dict(plan):
+            start_dt = _get(plan, "StartDate", "startDate")
+            end_dt = _get(plan, "EndDate", "endDate")
+            return {
+                "customerPlanID": _get(plan, "CustomerPlanID", "customerPlanID"),
+                "customerID": _get(plan, "CustomerID", "customerID"),
+                "startDate": start_dt.isoformat() if hasattr(start_dt, "isoformat") else start_dt,
+                "endDate": end_dt.isoformat() if hasattr(end_dt, "isoformat") else end_dt,
+                "currentPremium": _get(plan, "CurrentPremium", "currentPremium"),
+                "status": _get(plan, "Status", "status"),
+                "planID": _get(plan, "planID", "PlanID"),
+            }
+
+        plans_list = [_plan_to_dict(p) for p in plans]
+
+        return Response(
+            {
+                "userID": user_id,
+                "customerID": getattr(customer, "CustomerID", None),
+                "count": len(plans_list),
+                "plans": plans_list,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ResetPasswordView(APIView):
     """
     Reset the password using a valid token. Expects JSON: { "token", "new_password" }
