@@ -66,6 +66,11 @@ const Login = () => {
             navigate("/home");
             localStorage.setItem("userID", data.user.userid);
             localStorage.setItem("userRoleID", data.user.roleID);
+          } else if (data.user.roleID === 3) {
+            console.log(data);
+            navigate("/managerHomePage");
+            localStorage.setItem("userID", data.user.userid);
+            localStorage.setItem("userRoleID", data.user.roleID);
           } else {
             console.log(data.user);
             console.log("Login failed: Insufficient permissions");

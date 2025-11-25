@@ -18,9 +18,9 @@ function UserHomePage() {
   const storedUserID = localStorage.getItem("userID");
 
   const navItems = [
-    { name: "Policies", icon: "📜", path: "/policies" },
-    { name: "Claims", icon: "📝", path: "/claims" },
-    { name: "Submit Claim", icon: "✅", path: "#" },
+    { name: "Policies", path: "/policies" },
+    { name: "Claims", path: "/claims" },
+    { name: "Submit Claim", path: "#" },
   ];
 
   // --- Policy Data Fetching using useEffect ---
@@ -28,8 +28,6 @@ function UserHomePage() {
     if (!storedUserID) {
       setLoading(false);
       setFetchError("User ID not found. Please log in.");
-      // Optional: Redirect to login if no user ID
-      // navigate('/login');
       return;
     }
 
@@ -44,67 +42,64 @@ function UserHomePage() {
           },
         });
 
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch policies: Status ${response.status}`
+        // 1. Get raw text to debug the server response
+        const text = await response.text();
+        console.log("Server Response:", text); // <--- LOOK AT THIS IN YOUR BROWSER CONSOLE
+
+        let data = [];
+        let parseSuccess = false;
+
+        // 2. Try to parse it
+        try {
+          data = JSON.parse(text);
+          parseSuccess = true;
+        } catch (err) {
+          console.error(
+            "This is not JSON! It is likely an HTML error page.",
+            err
           );
         }
 
-        const data = await response.json();
-        // Fallback to mock data if API is empty or for local testing
-        const mockPolicies =
-          data.length > 0
-            ? data
-            : [
-                {
-                  policy_id: "P001",
-                  policy_name: "Homeowner Plus",
-                  status: "Active",
-                  coverage_amount: 500000,
-                  start_date: "2024-01-01",
-                  premium: 1200,
-                },
-                {
-                  policy_id: "P002",
-                  policy_name: "Auto Platinum",
-                  status: "Pending",
-                  coverage_amount: 50000,
-                  start_date: "2024-05-15",
-                  premium: 800,
-                },
-                {
-                  policy_id: "P003",
-                  policy_name: "Life Basic",
-                  status: "Active",
-                  coverage_amount: 250000,
-                  start_date: "2023-11-20",
-                  premium: 450,
-                },
-              ];
-        setPolicies(mockPolicies);
-        setFetchError(null);
+        // 3. Logic: If parse succeeded and we have data, use it. Otherwise, use Mock.
+        if (parseSuccess && Array.isArray(data) && data.length > 0) {
+          setPolicies(data);
+          setFetchError(null);
+        } else {
+          console.warn(
+            "Using Mock Data because API returned empty or invalid JSON."
+          );
+          // Define Mock Data here
+          const mockPolicies = [
+            {
+              policy_id: "P001",
+              policy_name: "Homeowner Plus",
+              status: "Active",
+              coverage_amount: 500000,
+              start_date: "2024-01-01",
+              premium: 1200,
+            },
+            {
+              policy_id: "P002",
+              policy_name: "Auto Platinum",
+              status: "Pending",
+              coverage_amount: 50000,
+              start_date: "2024-05-15",
+              premium: 800,
+            },
+            {
+              policy_id: "P003",
+              policy_name: "Life Basic",
+              status: "Active",
+              coverage_amount: 250000,
+              start_date: "2023-11-20",
+              premium: 450,
+            },
+          ];
+          setPolicies(mockPolicies);
+        }
       } catch (error) {
-        console.error("Policy fetch error:", error);
-        // Display mock data on error
-        setPolicies([
-          {
-            policy_id: "P001",
-            policy_name: "Homeowner Plus",
-            status: "Active",
-            coverage_amount: 500000,
-            start_date: "2024-01-01",
-            premium: 1200,
-          },
-          {
-            policy_id: "P002",
-            policy_name: "Auto Platinum",
-            status: "Pending",
-            coverage_amount: 50000,
-            start_date: "2024-05-15",
-            premium: 800,
-          },
-        ]);
-        setFetchError("Could not load real policies. Displaying mock data.");
+        console.error("Network error:", error);
+        setFetchError("Network Error. Displaying mock data.");
       } finally {
         setLoading(false);
       }
