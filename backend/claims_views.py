@@ -86,17 +86,19 @@ def _is_manager(user: User) -> bool:
     Input: User object
     Output: True/False
     """
-    # Accept either by resolved role name OR by numeric roleID == 2
+    # Accept either by resolved role name OR by numeric roleID == 3
     try:
         role_id = int(getattr(user, "roleID", 0))
     except Exception:
         role_id = 0
-    if role_id == 2:
+    # Only Supervisors (3) are managers; Agents (2) are not
+    if role_id == 3:
         return True
 
     role = (user.role_name or "").lower()
-    # Treat "agent" as equivalent to manager per spec
-    return role in ("agent", "manager", "admin", "superuser")
+    # Recognize supervisor and admin roles by name. Do NOT treat agent as manager.
+    # Role names in the DB are: customer, agent, supervisor, admin
+    return role in ("supervisor", "admin", "superuser")
 
 
 def _is_agent(user: User) -> bool:
@@ -106,7 +108,8 @@ def _is_agent(user: User) -> bool:
     Output: True/False
     """
     role = (user.role_name or "").lower()
-    return role in ("agent", "employee", "manager", "admin", "superuser")
+    # Treat supervisor as staff as well (but not as manager unless roleID==3)
+    return role in ("agent", "employee", "manager", "supervisor", "admin", "superuser")
 
 
 # ---- RoleID-based helpers (These look at the numeric ID instead of the string name) ----
