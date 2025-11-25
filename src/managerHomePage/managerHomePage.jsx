@@ -1,21 +1,22 @@
 import React, { useState, useEffect } from "react";
 
-// --- Component Definition ---
-
 function ManagerHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
-  const [activeTab, setActiveTab] = useState("approvals"); // 'approvals', 'assign', 'overview'
+  const [activeTab, setActiveTab] = useState("approvals");
 
   // Data States
   const [pendingPolicies, setPendingPolicies] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [allPolicies, setAllPolicies] = useState([]); // For the overview/assign tabs
+  const [allPolicies, setAllPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
 
-  const storedUserID = localStorage.getItem("userID") || "3"; // Defaulting to 3 for manager testing
+  // UI States
+  const [processingId, setProcessingId] = useState(null); // To show spinner on specific buttons
+  const [assignmentSelections, setAssignmentSelections] = useState({}); // Map: { policyID: agentID }
 
-  // Navigation Items adapted for Manager
+  const storedUserID = localStorage.getItem("userID") || "3";
+
   const navItems = [
     { id: "approvals", name: "Pending Approvals", icon: "🛡️" },
     { id: "assign", name: "Assign Policies", icon: "👤" },
@@ -23,102 +24,72 @@ function ManagerHomePage() {
   ];
 
   // --- Data Fetching ---
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const headers = {
-          "Content-Type": "application/json",
-          "x-user-id": String(storedUserID),
-        };
 
-        // 1. Fetch Pending Policies (For approval dashboard)
-        // Uses ManagerPendingPoliciesView
-        const pendingRes = await fetch(
-          "http://127.0.0.1:8000/api/manager/policies/pending/",
-          { headers }
-        );
-        const pendingData = await pendingRes.json();
+  const fetchData = async () => {
+    setLoading(true);
+    setFetchError(null);
 
-        // 2. Fetch Agents (For assignment dropdowns)
-        // Uses ManagerEmployeesView
-        const agentsRes = await fetch(
-          "http://127.0.0.1:8000/api/manager/employees/",
-          { headers }
-        );
-        const agentsData = await agentsRes.json();
+    try {
+      const headers = {
+        "Content-Type": "application/json",
+        "x-user-id": String(storedUserID),
+      };
 
-        // 3. Fetch All Policies (For assignment logic - assuming a general list view exists)
-        // Using the general PolicyListCreateView but filtered for logic
-        const allPolRes = await fetch("http://127.0.0.1:8000/api/policies/", {
+      // Use Promise.all to fetch in parallel for better performance
+      const [pendingRes, agentsRes, allPolRes] = await Promise.all([
+        fetch("http://127.0.0.1:8000/api/manager/policies/pending/", {
           headers,
-        });
-        const allPolData = await allPolRes.json();
+        }),
+        fetch("http://127.0.0.1:8000/api/manager/employees/", { headers }),
+        fetch("http://127.0.0.1:8000/api/policies/", { headers }),
+      ]);
 
-        // State Updates with Fallback Mock Data if backend is empty/down
-        setPendingPolicies(
-          pendingData.policies || [
-            {
-              PolicyID: 901,
-              CustomerID: 456,
-              Status: "pending",
-              CreatedAt: "2025-11-13",
-              policy_name: "Home Bundle A",
-            },
-            {
-              PolicyID: 902,
-              CustomerID: 457,
-              Status: "pending",
-              CreatedAt: "2025-11-14",
-              policy_name: "Auto Ops",
-            },
-          ]
-        );
+      const pendingData = await pendingRes.json();
+      const agentsData = await agentsRes.json();
+      const allPolData = await allPolRes.json();
 
-        setAgents(
-          agentsData.employees || [
-            { userid: 101, username: "agent_smith", role: "agent" },
-            { userid: 102, username: "agent_doe", role: "agent" },
-          ]
-        );
+      // Set Data or Fallbacks
+      setPendingPolicies(pendingData.policies || []);
+      setAgents(agentsData.employees || []);
+      setAllPolicies(allPolData.policies || []);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      setFetchError("Could not load live data. Using offline mode.");
 
-        setAllPolicies(allPolData.policies || []);
-        setFetchError(null);
-      } catch (error) {
-        console.error("Fetch error:", error);
-        setFetchError("Could not load manager data. Using offline mode.");
-        // Mocks for offline testing
-        setPendingPolicies([
-          {
-            PolicyID: 901,
-            CustomerID: 456,
-            Status: "pending",
-            CreatedAt: "2025-11-13",
-            policy_name: "Home Bundle A",
-          },
-          {
-            PolicyID: 902,
-            CustomerID: 457,
-            Status: "pending",
-            CreatedAt: "2025-11-14",
-            policy_name: "Auto Ops",
-          },
-        ]);
-        setAgents([
-          { userid: 101, username: "Agent Smith", role: "agent" },
-          { userid: 102, username: "Agent Doe", role: "agent" },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    };
+      // Mocks
+      setPendingPolicies([
+        {
+          PolicyID: 901,
+          CustomerID: 456,
+          Status: "pending",
+          CreatedAt: "2025-11-13",
+          policy_name: "Home Bundle A",
+        },
+        {
+          PolicyID: 902,
+          CustomerID: 457,
+          Status: "pending",
+          CreatedAt: "2025-11-14",
+          policy_name: "Auto Ops",
+        },
+      ]);
+      setAgents([
+        { userid: 101, username: "agent_smith", role: "agent" },
+        { userid: 102, username: "agent_doe", role: "agent" },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchData();
   }, [storedUserID]);
 
   // --- Actions ---
 
   const handleDecision = async (policyId, decision) => {
+    setProcessingId(policyId); // Start loading spinner for this specific card
     try {
       const response = await fetch(
         `http://127.0.0.1:8000/api/policies/${policyId}/decision/`,
@@ -128,36 +99,61 @@ function ManagerHomePage() {
             "Content-Type": "application/json",
             "x-user-id": String(storedUserID),
           },
-          body: JSON.stringify({ decision: decision }), // 'approve' or 'reject'
+          body: JSON.stringify({ decision: decision }),
         }
       );
 
       if (response.ok) {
-        // Remove the policy from the local list upon success
         setPendingPolicies((prev) =>
           prev.filter((p) => p.PolicyID !== policyId)
         );
-        alert(`Policy ${policyId} ${decision}d successfully.`);
+        // Optional: Also update 'allPolicies' if you want the history to reflect the change immediately
       } else {
-        alert("Failed to submit decision.");
+        alert("Failed to submit decision. Server returned an error.");
       }
     } catch (err) {
       console.error(err);
       alert("Network error submitting decision.");
+    } finally {
+      setProcessingId(null);
     }
   };
 
-  const handleAssignAgent = (policyId, agentId) => {
-    // NOTE: You need to implement an endpoint for this, e.g., PATCH /api/policies/{id}/assign
-    console.log(`Assigning Policy ${policyId} to Agent ${agentId}`);
-    alert(`Simulated: Assigned Policy ${policyId} to Agent ID ${agentId}`);
+  // Handle Select Change for Assignment
+  const handleSelectionChange = (policyId, agentId) => {
+    setAssignmentSelections((prev) => ({
+      ...prev,
+      [policyId]: agentId,
+    }));
+  };
 
-    // Update local state to reflect assignment (for demo purposes)
-    setAllPolicies((prev) =>
-      prev.map((p) =>
-        p.PolicyID === policyId ? { ...p, AssignedAgentID: agentId } : p
-      )
-    );
+  const handleAssignAgent = async (policyId) => {
+    const agentId = assignmentSelections[policyId];
+    if (!agentId) return alert("Please select an agent first.");
+
+    setProcessingId(policyId);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Update local state
+      setAllPolicies((prev) =>
+        prev.map((p) =>
+          p.PolicyID === policyId ? { ...p, AssignedAgentID: agentId } : p
+        )
+      );
+
+      // Clear selection
+      setAssignmentSelections((prev) => {
+        const newState = { ...prev };
+        delete newState[policyId];
+        return newState;
+      });
+    } catch (error) {
+      alert("Failed to assign agent.");
+    } finally {
+      setProcessingId(null);
+    }
   };
 
   // --- Renderers ---
@@ -185,32 +181,45 @@ function ManagerHomePage() {
       </div>
 
       <div className="flex gap-3 mt-4">
-        <button
-          onClick={() => handleDecision(policy.PolicyID, "approve")}
-          className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md"
-        >
-          Approve
-        </button>
-        <button
-          onClick={() => handleDecision(policy.PolicyID, "reject")}
-          className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md"
-        >
-          Deny
-        </button>
+        {processingId === policy.PolicyID ? (
+          <div className="w-full flex justify-center py-2 text-gray-500 italic">
+            Processing...
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => handleDecision(policy.PolicyID, "approve")}
+              className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => handleDecision(policy.PolicyID, "reject")}
+              className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md"
+            >
+              Deny
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 
   const renderAssignTab = () => {
-    // Filter for policies that might need assignment (example logic)
-    const policiesToAssign = allPolicies.filter((p) => !p.AssignedAgentID);
+    // Filter: Policies that exist but have no assigned agent
+    const policiesToAssign = allPolicies.filter(
+      (p) => !p.AssignedAgentID && p.Status !== "rejected"
+    );
 
     return (
       <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
-        <div className="p-4 border-b bg-gray-50">
+        <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
           <h3 className="text-lg font-bold text-gray-700">
             Unassigned Policies
           </h3>
+          <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-full">
+            {policiesToAssign.length} Pending Assignment
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-600">
@@ -225,23 +234,38 @@ function ManagerHomePage() {
             <tbody>
               {policiesToAssign.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="p-6 text-center">
-                    No unassigned policies found.
+                  <td
+                    colSpan="4"
+                    className="p-8 text-center text-gray-400 italic"
+                  >
+                    All policies have been assigned.
                   </td>
                 </tr>
               ) : (
                 policiesToAssign.map((p) => (
-                  <tr key={p.PolicyID} className="border-b hover:bg-gray-50">
+                  <tr
+                    key={p.PolicyID}
+                    className="border-b hover:bg-gray-50 transition"
+                  >
                     <td className="p-4 font-mono">{p.PolicyID}</td>
                     <td className="p-4">
-                      <span className="px-2 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-800">
+                      <span
+                        className={`px-2 py-1 rounded text-xs font-semibold ${
+                          p.Status === "approved"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-blue-100 text-blue-800"
+                        }`}
+                      >
                         {p.Status}
                       </span>
                     </td>
                     <td className="p-4">
                       <select
-                        id={`select-${p.PolicyID}`}
-                        className="bg-white border border-gray-300 rounded p-2 w-full focus:ring-2 focus:ring-blue-500"
+                        value={assignmentSelections[p.PolicyID] || ""}
+                        onChange={(e) =>
+                          handleSelectionChange(p.PolicyID, e.target.value)
+                        }
+                        className="bg-white border border-gray-300 rounded p-2 w-full focus:ring-2 focus:ring-blue-500 outline-none"
                       >
                         <option value="">Select Agent...</option>
                         {agents.map((a) => (
@@ -253,16 +277,18 @@ function ManagerHomePage() {
                     </td>
                     <td className="p-4">
                       <button
-                        onClick={() => {
-                          const select = document.getElementById(
-                            `select-${p.PolicyID}`
-                          );
-                          if (select.value)
-                            handleAssignAgent(p.PolicyID, select.value);
-                        }}
-                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
+                        disabled={
+                          !assignmentSelections[p.PolicyID] ||
+                          processingId === p.PolicyID
+                        }
+                        onClick={() => handleAssignAgent(p.PolicyID)}
+                        className={`px-4 py-2 rounded transition shadow-sm ${
+                          !assignmentSelections[p.PolicyID]
+                            ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                            : "bg-blue-600 text-white hover:bg-blue-700"
+                        }`}
                       >
-                        Assign
+                        {processingId === p.PolicyID ? "Saving..." : "Assign"}
                       </button>
                     </td>
                   </tr>
@@ -279,45 +305,64 @@ function ManagerHomePage() {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {agents.map((agent) => {
-          // Mock filtering: Find policies assigned to this agent
-          // In real app, fetch this relation properly
           const agentPolicies = allPolicies.filter(
-            (p) => p.AssignedAgentID == agent.userid
+            (p) => Number(p.AssignedAgentID) === Number(agent.userid)
           );
 
           return (
             <div
               key={agent.userid}
-              className="bg-white rounded-xl shadow p-5 border-t-4 border-blue-500"
+              className="bg-white rounded-xl shadow p-5 border-t-4 border-blue-500 flex flex-col h-full"
             >
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-gray-800">
-                  {agent.username}
-                </h3>
-                <span className="text-sm text-gray-500">
-                  ID: {agent.userid}
-                </span>
+              <div className="flex justify-between items-center mb-4 border-b pb-2">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {agent.username}
+                  </h3>
+                  <span className="text-xs text-gray-400 uppercase font-semibold">
+                    {agent.role}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="block text-2xl font-bold text-blue-600">
+                    {agentPolicies.length}
+                  </span>
+                  <span className="text-xs text-gray-500">Active Cases</span>
+                </div>
               </div>
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold uppercase text-gray-400 tracking-wider">
-                  Current Assignments
+
+              <div className="space-y-2 flex-1">
+                <h4 className="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2">
+                  Workload
                 </h4>
                 {agentPolicies.length > 0 ? (
-                  <ul className="space-y-1">
+                  <ul className="space-y-1 max-h-40 overflow-y-auto pr-2">
                     {agentPolicies.map((p) => (
                       <li
                         key={p.PolicyID}
-                        className="flex justify-between text-sm bg-gray-50 p-2 rounded"
+                        className="flex justify-between text-sm bg-gray-50 p-2 rounded border border-gray-100"
                       >
-                        <span>Policy #{p.PolicyID}</span>
-                        <span className="text-gray-500">{p.Status}</span>
+                        <span className="font-mono text-gray-600">
+                          #{p.PolicyID}
+                        </span>
+                        <span
+                          className={`text-xs font-bold px-2 rounded ${
+                            p.Status === "approved"
+                              ? "text-green-600 bg-green-50"
+                              : "text-yellow-600 bg-yellow-50"
+                          }`}
+                        >
+                          {p.Status}
+                        </span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm italic text-gray-400">
-                    No active assignments.
-                  </p>
+                  <div className="h-20 flex items-center justify-center bg-gray-50 rounded border border-dashed border-gray-200">
+                    <p className="text-sm italic text-gray-400">
+                      No active assignments.
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
@@ -370,8 +415,8 @@ function ManagerHomePage() {
           ))}
         </nav>
 
-        <div className="absolute bottom-6 left-6">
-          <div className="flex items-center gap-3">
+        <div className="absolute bottom-6 left-6 w-52">
+          <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
             <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold border border-purple-200">
               M
             </div>
@@ -392,33 +437,47 @@ function ManagerHomePage() {
           >
             ☰
           </button>
-          <h1 className="hidden lg:block text-xl font-bold text-gray-800 mr-auto px-4">
-            {navItems.find((n) => n.id === activeTab)?.name}
-          </h1>
+          <div className="flex items-center gap-4 mr-auto lg:mr-0 lg:ml-auto">
+            <button
+              onClick={fetchData}
+              className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+            >
+              ↻ Refresh Data
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-6 lg:p-10">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">
+              {navItems.find((n) => n.id === activeTab)?.name}
+            </h1>
+          </div>
+
           {fetchError && (
-            <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm">
-              <p className="font-bold">System Notification</p>
-              <p>{fetchError}</p>
+            <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm flex justify-between items-center">
+              <div>
+                <p className="font-bold">System Notification</p>
+                <p className="text-sm">{fetchError}</p>
+              </div>
+              <button onClick={fetchData} className="text-xs underline">
+                Retry
+              </button>
             </div>
           )}
 
-          {/* TAB CONTENT RENDERER */}
           {loading ? (
-            <div className="flex justify-center items-center h-64 text-gray-400">
-              Loading Dashboard...
+            <div className="flex justify-center items-center h-64 flex-col gap-4 text-gray-400">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <p>Loading Dashboard...</p>
             </div>
           ) : (
             <>
               {activeTab === "approvals" && (
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-6">
-                    Approvals Required
-                  </h2>
                   {pendingPolicies.length === 0 ? (
                     <div className="text-center p-12 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
+                      <div className="text-4xl mb-4">🎉</div>
                       No pending policies found. Good job!
                     </div>
                   ) : (
@@ -430,21 +489,11 @@ function ManagerHomePage() {
               )}
 
               {activeTab === "assign" && (
-                <div className="max-w-5xl mx-auto">
-                  <h2 className="text-2xl font-bold text-gray-800 mb-6">
-                    Assign Policies to Agents
-                  </h2>
-                  {renderAssignTab()}
-                </div>
+                <div className="max-w-6xl mx-auto">{renderAssignTab()}</div>
               )}
 
               {activeTab === "overview" && (
-                <div className="max-w-6xl mx-auto">
-                  <h2 className="text-2xl font-bold text-gray-800 mb-6">
-                    Agent Workload Overview
-                  </h2>
-                  {renderOverviewTab()}
-                </div>
+                <div className="max-w-6xl mx-auto">{renderOverviewTab()}</div>
               )}
             </>
           )}
