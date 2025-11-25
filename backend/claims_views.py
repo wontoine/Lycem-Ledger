@@ -7,33 +7,43 @@ from datetime import datetime
 
 
 def _now_utc():
-    """Returns the current datetime in UTC."""
+    """
+    Just a helper to get the current time in UTC so we don't have timezone headaches.
+
+    Output: datetime object (UTC)
+    """
     return datetime.utcnow()
 
 
 def _new_log_id() -> int:
-    """Generates a unique integer ID based on the current millisecond epoch."""
+    """
+    Creates a unique ID number based on the current time (milliseconds).
+    Used for logs or ID generation so we don't get duplicates.
+
+    Output: int (e.g., 1678886400123)
+    """
     return int(datetime.utcnow().timestamp() * 1000)
 
 
 def _current_user(request):
     """
-    Identifies the current user from the 'userid' header.
-    Returns a User object or None if not found or on error.
+    Tries to figure out who is making the request by looking at the headers.
+    It checks 'userid' first, but also looks for 'X-User-ID' just in case we are using old code.
 
-    Backward compatibility: still accepts legacy 'X-User-ID' if present.
+    Input: request object
+    Output: User object (if found) OR None (if they don't exist or header is missing)
     """
     try:
-        # Preferred new header name
+        # Check the new header style first, then fallback to legacy
         uid = (
-            request.headers.get("userid")
-            or request.META.get("HTTP_USERID")
-            # Legacy support
-            or request.headers.get("X-User-ID")
-            or request.META.get("HTTP_X_USER_ID")
+                request.headers.get("userid")
+                or request.META.get("HTTP_USERID")
+                or request.headers.get("X-User-ID")
+                or request.META.get("HTTP_X_USER_ID")
         )
         if not uid:
             return None
+        # Grab the user from the database
         user = User.objects(userid=int(uid)).first()
         return user
     except Exception:
@@ -42,15 +52,15 @@ def _current_user(request):
 
 def _require_user(request):
     """
-    Ensures a valid and enabled user is authenticated via the 'userid' header.
-    Returns (user, None) on success.
-    Returns (None, Response) on failure.
+    The bouncer function. It checks if the user is logged in AND if their account is actually enabled.
 
-    Failure JSON Output (401 Unauthorized):
-    {"error": "Unauthorized: missing or invalid userid"}
+    Input: request object
 
-    Failure JSON Output (403 Forbidden):
-    {"error": "Account disabled"}
+    Output (Success): (User object, None)
+    Output (Failure - Not logged in): (None, Response 401)
+       -> {"error": "Unauthorized: missing or invalid userid"}
+    Output (Failure - Account disabled): (None, Response 403)
+       -> {"error": "Account disabled"}
     """
     user = _current_user(request)
     if not user:
@@ -62,25 +72,38 @@ def _require_user(request):
 
 
 def _is_admin(user: User) -> bool:
-    """Checks if the user has an 'admin' or 'superuser' role."""
+    """
+    Checks if the user is a superuser or admin.
+    Input: User object
+    Output: True/False
+    """
     return (user.role_name or "").lower() in ("admin", "superuser")
 
 
 def _is_manager(user: User) -> bool:
-    """Checks if the user has a 'manager', 'admin', or 'superuser' role."""
+    """
+    Checks if the user has manager privileges (includes admins).
+    Input: User object
+    Output: True/False
+    """
     role = (user.role_name or "").lower()
     return role in ("manager", "admin", "superuser")
 
 
 def _is_agent(user: User) -> bool:
-    """Checks if the user has an 'agent', 'employee', 'manager', 'admin', or 'superuser' role."""
+    """
+    Checks if the user is staff (agent, employee, manager, etc.).
+    Input: User object
+    Output: True/False
+    """
     role = (user.role_name or "").lower()
     return role in ("agent", "employee", "manager", "admin", "superuser")
 
 
-# ---- RoleID-based access helpers (authoritative) ----
+# ---- RoleID-based helpers (These look at the numeric ID instead of the string name) ----
+
 def _has_full_access(user: User) -> bool:
-    """RoleIDs 3 and 4 can access all information (read)."""
+    """RoleID 3 and 4 allow reading everything."""
     try:
         return int(getattr(user, "roleID", 0)) in (3, 4)
     except Exception:
@@ -88,7 +111,7 @@ def _has_full_access(user: User) -> bool:
 
 
 def _is_assigned_clients_only(user: User) -> bool:
-    """RoleID 2 can access information of their assigned clients (read)."""
+    """RoleID 2 limits the user to only seeing their assigned clients."""
     try:
         return int(getattr(user, "roleID", 0)) == 2
     except Exception:
@@ -96,7 +119,7 @@ def _is_assigned_clients_only(user: User) -> bool:
 
 
 def _is_self_only(user: User) -> bool:
-    """RoleID 1 can access only their own policies and information (read)."""
+    """RoleID 1 is for regular customers. They can only see their own stuff."""
     try:
         return int(getattr(user, "roleID", 0)) == 1
     except Exception:
@@ -104,7 +127,12 @@ def _is_self_only(user: User) -> bool:
 
 
 def _own_customer_ids(user: User):
-    """Return a set of CustomerID(s) owned by this user (via customers.UserID == user.userid)."""
+    """
+    Finds the CustomerID associated with this User account.
+    Useful for customers seeing their own data.
+
+    Output: Set of CustomerIDs (e.g., {456})
+    """
     try:
         custs = Customer.objects(UserID=user.userid)
         return {c.CustomerID for c in custs}
@@ -114,8 +142,9 @@ def _own_customer_ids(user: User):
 
 def _assigned_customer_ids(user: User):
     """
-    Return a set of CustomerID(s) assigned to this user. We infer assignment via
-    Claim.AssignedToUserID == user.userid.
+    Finds which customers are assigned to this agent based on claims they are working on.
+
+    Output: Set of CustomerIDs
     """
     try:
         claims = Claim.objects(AssignedToUserID=user.userid)
@@ -126,40 +155,36 @@ def _assigned_customer_ids(user: User):
 
 class AgentClaimsDashboard(APIView):
     """
-    Provides an agent-specific view to list all claims assigned to the current user.
+    Dashboard for Agents to see what they need to work on.
 
     GET:
-    - Requires: Agent-level permissions ('agent', 'employee', 'manager', 'admin', 'superuser').
-    - Success JSON Output (200 OK):
+    - Lists all claims assigned to the logged-in agent.
+    - Input: 'userid' header (must be an agent).
+    - Output (Success 200):
       {
         "claims": [
           {
             "ClaimID": 123,
-            "CustomerID": 456,
-            "PolicyID": 789,
             "Status": "submitted",
             "Amount": 1500.00,
-            "Reason": "Water damage",
-            "ItemIDs": [10, 11],
-            "CreatedAt": "2025-11-13T14:30:00Z",
-            "UpdatedAt": "2025-11-13T14:30:00Z"
+            ... (other claim fields)
           }
         ]
       }
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
-    - Failure JSON Output (500 Internal Server Error):
-      {"error": "database error description"}
+    - Output (Fail 403): If you aren't an agent.
     """
 
     def get(self, request):
         user, err = _require_user(request)
         if err:
             return err
+
+        # Security check: Only agents allow here
         if not _is_agent(user):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Grab all claims where AssignedToUserID matches the current user
             claims = Claim.objects(AssignedToUserID=user.userid)
             data = [
                 {
@@ -182,68 +207,27 @@ class AgentClaimsDashboard(APIView):
 
 class ClaimDetailView(APIView):
     """
-    Handles CRUD operations for a single claim (identified by claim_id).
+    Main view for looking at one specific claim. Does read, update, and delete.
 
     GET:
-    - Retrieves claim details, plus the customer's previous claims and items.
-    - Permissions: Admin/Manager (any) or the assigned Agent.
-    - Success JSON Output (200 OK):
+    - Pulls up the claim info, PLUS the customer's history and their items (so the agent has context).
+    - Input: claim_id in URL.
+    - Output (200):
       {
-        "claim": {
-          "ClaimID": 123,
-          "CustomerID": 456,
-          "PolicyID": 789,
-          "AssignedToUserID": 77,
-          "Status": "submitted",
-          "Amount": 1500.00,
-          "Reason": "Water damage",
-          "ItemIDs": [10, 11],
-          "CreatedAt": "2025-11-13T14:30:00Z",
-          "UpdatedAt": "2025-11-13T14:30:00Z"
-        },
-        "previousClaims": [
-          {
-            "ClaimID": 101,
-            "Status": "accepted",
-            "Amount": 250.00,
-            "CreatedAt": "2024-05-10T10:00:00Z"
-          }
-        ],
-        "customerItems": [
-          {
-            "ItemID": 10,
-            "Name": "Laptop",
-            "Description": "15in MacBook Pro",
-            "Value": 2000.00
-          }
-        ]
+        "claim": { ... details ... },
+        "previousClaims": [ ... old claims ... ],
+        "customerItems": [ ... items owned by customer ... ]
       }
-    - Failure JSON Output (404 Not Found):
-      {"error": "Claim not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
 
-    PUT / PATCH:
-    - Updates a claim using the provided JSON body.
-    - Permissions: Admin/Manager (any) or the assigned Agent.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Claim not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Invalid value for {field}"}
+    PUT:
+    - Updates fields in the claim.
+    - Input: JSON body with fields to change (e.g., {"Status": "reviewing"}).
+    - Output (200): {"ok": true}
 
     DELETE:
-    - Deletes a claim.
-    - Permissions: Admin only.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Claim not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Deletes the claim entirely.
+    - Permission: Admin ONLY.
+    - Output (200): {"ok": true}
     """
 
     def get(self, request, claim_id: int):
@@ -255,9 +239,11 @@ class ClaimDetailView(APIView):
             if not claim:
                 return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
 
+            # Access Check: Must be Manager, Admin, OR the specific agent assigned to this claim
             if not (_is_manager(user) or _is_admin(user) or (claim.AssignedToUserID == user.userid)):
                 return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
+            # Fetch extra context for the frontend
             previous_claims = Claim.objects(CustomerID=claim.CustomerID, ClaimID__ne=claim.ClaimID)
             customer_items = Item.objects(CustomerID=claim.CustomerID)
 
@@ -305,9 +291,12 @@ class ClaimDetailView(APIView):
             claim = Claim.objects(ClaimID=int(claim_id)).first()
             if not claim:
                 return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Access Check
             if not (_is_manager(user) or _is_admin(user) or (claim.AssignedToUserID == user.userid)):
                 return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
+            # Map fields to their types for safe casting
             updatable = {
                 "CustomerID": int,
                 "PolicyID": (lambda v: int(v) if v is not None else None),
@@ -318,6 +307,8 @@ class ClaimDetailView(APIView):
                 "ItemIDs": (lambda v: list(v) if isinstance(v, (list, tuple)) else []),
             }
             payload = request.data or {}
+
+            # Loop through payload and update if the field is valid
             for field, caster in updatable.items():
                 if field in payload:
                     val = payload.get(field)
@@ -326,9 +317,11 @@ class ClaimDetailView(APIView):
                     except Exception:
                         return Response({"error": f"Invalid value for {field}"}, status=status.HTTP_400_BAD_REQUEST)
                     setattr(claim, field, val)
+
             claim.UpdatedAt = _now_utc()
             claim.save()
 
+            # Create an audit log for the update
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -344,20 +337,25 @@ class ClaimDetailView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def patch(self, request, claim_id: int):
+        # Just reuse the PUT logic for partial updates
         return self.put(request, claim_id)
 
     def delete(self, request, claim_id: int):
         user, err = _require_user(request)
         if err:
             return err
+
+        # Only admins can delete claims history!
         if not _is_admin(user):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
         try:
             claim = Claim.objects(ClaimID=int(claim_id)).first()
             if not claim:
                 return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
             cid = claim.ClaimID
             claim.delete()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -367,6 +365,7 @@ class ClaimDetailView(APIView):
                 Details=None,
                 CreatedAt=_now_utc(),
             ).save()
+
             return Response({"ok": True}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -374,21 +373,12 @@ class ClaimDetailView(APIView):
 
 class ClaimDecisionView(APIView):
     """
-    Handles the action of accepting or rejecting a specific claim.
+    Where the Agent makes the call: Accept or Reject.
 
     POST:
-    - Requires: Agent-level permissions. Agents can only decide on their
-      assigned claims; Managers/Admins can decide on any.
-    - Input JSON Body:
-      {"decision": "accept"|"reject", "reason": "Optional reason text"}
-    - Success JSON Output (200 OK):
-      {"ok": true, "newStatus": "accepted"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Invalid decision"}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Claim not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Input: JSON body {"decision": "accept", "reason": "Looks good"} or {"decision": "reject"}.
+    - Logic: Agents can only decide on THEIR assigned claims. Managers can decide on any.
+    - Output (200): {"ok": true, "newStatus": "accepted"}
     """
 
     def post(self, request, claim_id: int):
@@ -400,6 +390,8 @@ class ClaimDecisionView(APIView):
 
         decision = (request.data.get("decision") or "").strip().lower()
         reason = request.data.get("reason")
+
+        # Validate input
         if decision not in ("accept", "reject"):
             return Response({"error": "Invalid decision"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -407,6 +399,8 @@ class ClaimDecisionView(APIView):
             claim = Claim.objects(ClaimID=int(claim_id)).first()
             if not claim:
                 return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Access logic: If you aren't a manager, you must be the assigned agent
             if claim.AssignedToUserID not in (None, user.userid) and not _is_manager(user) and not _is_admin(user):
                 return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -430,26 +424,108 @@ class ClaimDecisionView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class ManagerEmployeesView(APIView):
+class SupervisorClaimsReviewList(APIView):
     """
-    Provides a manager-specific view to list their direct employees.
+    List for Managers to review claims that Agents have already 'accepted'.
 
     GET:
-    - Requires: Manager-level permissions ('manager', 'admin', 'superuser').
-    - Success JSON Output (200 OK):
+    - Only for Managers/Admins.
+    - Input: None.
+    - Output (200): List of claims with Status='accepted'.
+      { "claims": [...] }
+    """
+
+    def get(self, request):
+        user, err = _require_user(request)
+        if err:
+            return err
+        if not (_is_manager(user) or _is_admin(user)):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            claims = Claim.objects(Status="accepted")
+            data = [
+                {
+                    "ClaimID": c.ClaimID,
+                    "CustomerID": c.CustomerID,
+                    "PolicyID": c.PolicyID,
+                    "AssignedToUserID": c.AssignedToUserID,
+                    "Status": c.Status,
+                    "Amount": c.Amount,
+                    "Reason": c.Reason,
+                    "ItemIDs": list(c.ItemIDs or []),
+                    "CreatedAt": c.CreatedAt,
+                    "UpdatedAt": c.UpdatedAt,
+                }
+                for c in claims
+            ]
+            return Response({"claims": data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class SupervisorClaimDecisionView(APIView):
+    """
+    Manager's final say on a claim. They can Approve or Deny what the agent accepted.
+
+    POST:
+    - Input: {"decision": "approve"|"deny", "reason": "optional"}.
+    - Constraint: Can only act on claims that are currently 'accepted'.
+    - Output (200): {"ok": true, "newStatus": "approved"}
+    """
+
+    def post(self, request, claim_id: int):
+        user, err = _require_user(request)
+        if err:
+            return err
+        if not (_is_manager(user) or _is_admin(user)):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        decision = (request.data.get("decision") or "").strip().lower()
+        reason = request.data.get("reason")
+        if decision not in ("approve", "deny"):
+            return Response({"error": "Invalid decision"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            claim = Claim.objects(ClaimID=int(claim_id)).first()
+            if not claim:
+                return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Workflow check: Must be accepted first
+            if (claim.Status or "").lower() != "accepted":
+                return Response({"error": "Only accepted claims can be decided by supervisor"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            claim.Status = "approved" if decision == "approve" else "denied"
+            claim.Reason = reason or claim.Reason
+            claim.UpdatedAt = _now_utc()
+            claim.save()
+
+            AuditLog(
+                LogID=_new_log_id(),
+                ActorUserID=user.userid,
+                Action=f"supervisor_claim_{decision}",
+                TargetType="claim",
+                TargetID=str(claim.ClaimID),
+                Details={"reason": reason} if reason else None,
+                CreatedAt=_now_utc(),
+            ).save()
+
+            return Response({"ok": True, "newStatus": claim.Status}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ManagerEmployeesView(APIView):
+    """
+    Shows a manager their direct reports.
+
+    GET:
+    - Input: None.
+    - Output (200): List of users where managerID matches current user.
       {
         "employees": [
-          {
-            "userid": 77,
-            "username": "agent_bob",
-            "email": "bob@example.com",
-            "role": "agent",
-            "isEnabled": true
-          }
+          {"userid": 77, "username": "agent_bob", "role": "agent", ...}
         ]
       }
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
     """
 
     def get(self, request):
@@ -478,23 +554,12 @@ class ManagerEmployeesView(APIView):
 
 class ManagerPendingPoliciesView(APIView):
     """
-    Provides a manager-specific view to list all policies awaiting approval.
+    Shows a manager all new policies that are waiting to be signed off.
 
     GET:
-    - Requires: Manager-level permissions ('manager', 'admin', 'superuser').
-    - Success JSON Output (200 OK):
-      {
-        "policies": [
-          {
-            "PolicyID": 901,
-            "CustomerID": 456,
-            "Status": "pending",
-            "CreatedAt": "2025-11-13T14:30:00Z"
-          }
-        ]
-      }
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Input: None.
+    - Output (200): Policies with Status='pending'.
+      { "policies": [...] }
     """
 
     def get(self, request):
@@ -522,20 +587,12 @@ class ManagerPendingPoliciesView(APIView):
 
 class ManagerPolicyDecisionView(APIView):
     """
-    Handles the action of approving or rejecting a specific pending policy.
+    Manager approves or rejects a pending policy.
 
     POST:
-    - Requires: Manager-level permissions.
-    - Input JSON Body:
-      {"decision": "approve"|"reject"}
-    - Success JSON Output (200 OK):
-      {"ok": true, "newStatus": "approved"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Invalid decision"}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Policy not found"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Policy is not pending"}
+    - Input: {"decision": "approve"|"reject"}.
+    - Constraint: Policy must currently be 'pending'.
+    - Output (200): {"ok": true, "newStatus": "approved"}
     """
 
     def post(self, request, policy_id: int):
@@ -577,26 +634,12 @@ class ManagerPolicyDecisionView(APIView):
 
 class AdminAuditLogView(APIView):
     """
-    Provides an admin-only view to list the 500 most recent audit log entries.
+    The 'Big Brother' view. Admins can see the last 500 actions taken in the system.
 
     GET:
-    - Requires: Admin-level permissions ('admin', 'superuser').
-    - Success JSON Output (200 OK):
-      {
-        "logs": [
-          {
-            "LogID": 1678886400123,
-            "ActorUserID": 1,
-            "Action": "claim_update",
-            "TargetType": "claim",
-            "TargetID": "123",
-            "Details": {"reason": "Updated amount"},
-            "CreatedAt": "2025-11-13T14:30:00Z"
-          }
-        ]
-      }
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Input: None.
+    - Output (200): List of 500 most recent logs.
+      { "logs": [ { "Action": "claim_update", ... } ] }
     """
 
     def get(self, request):
@@ -626,51 +669,25 @@ class AdminAuditLogView(APIView):
 
 class ClaimListCreateView(APIView):
     """
-    Handles listing and creation of claims.
+    The main endpoint for getting lists of claims or creating a new one.
 
     GET:
-    - Lists claims. Admin/Manager users see all claims.
-    - Agents see only claims assigned to them.
-    - Success JSON Output (200 OK):
-      {
-        "claims": [
-          {
-            "ClaimID": 123,
-            "CustomerID": 456,
-            "PolicyID": 789,
-            "AssignedToUserID": 77,
-            "Status": "submitted",
-            "Amount": 1500.00,
-            "Reason": "Water damage",
-            "ItemIDs": [10, 11],
-            "CreatedAt": "2025-11-13T14:30:00Z",
-            "UpdatedAt": "2025-11-13T14:30:00Z"
-          }
-        ]
-      }
+    - Shows claims based on who you are:
+      1. Managers/Admins -> See everything.
+      2. Agents -> See only claims assigned to them.
+      3. Customers -> See only their own claims.
+    - Output (200): { "claims": [...] }
 
     POST:
     - Creates a new claim.
-    - Requires: Agent-level permissions.
-    - Input JSON Body (ClaimID and CustomerID are required):
+    - Input (JSON):
       {
-        "ClaimID": 124,
-        "CustomerID": 456,
-        "PolicyID": 789,
-        "AssignedToUserID": 77,
-        "Status": "submitted",
-        "Reason": "New claim",
-        "Amount": 500.00,
-        "ItemIDs": [12]
+        "CustomerID": 456, (Required, unless you are the customer, then we infer it)
+        "Reason": "Fire",
+        "Amount": 500,
+        ...
       }
-    - Success JSON Output (201 Created):
-      {"created": true, "ClaimID": 124}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Missing field: ClaimID"}
-    - Failure JSON Output (409 Conflict):
-      {"error": "ClaimID already exists"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Output (201): {"created": true, "ClaimID": 124}
     """
 
     def get(self, request):
@@ -680,9 +697,18 @@ class ClaimListCreateView(APIView):
         try:
             q = {}
             if _is_manager(user) or _is_admin(user):
+                # Managers/Admins see everything, so no filter needed.
                 pass
-            else:
+            elif _is_agent(user):
+                # Agents filter by their own ID.
                 q["AssignedToUserID"] = user.userid
+            else:
+                # Customers only see their own stuff.
+                own_ids = list(_own_customer_ids(user) or [])
+                if not own_ids:
+                    return Response({"claims": []}, status=status.HTTP_200_OK)
+                q["CustomerID__in"] = own_ids
+
             claims = Claim.objects(**q)
             data = [
                 {
@@ -707,29 +733,85 @@ class ClaimListCreateView(APIView):
         user, err = _require_user(request)
         if err:
             return err
-        if not _is_agent(user):
+
+        # Who can create claims? Staff can, and Customers can (for themselves).
+        is_staffish = _is_agent(user) or _is_manager(user) or _is_admin(user)
+        is_customer = _is_self_only(user)
+
+        if not (is_staffish or is_customer):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
         try:
             payload = request.data or {}
-            required = ["ClaimID", "CustomerID"]
-            for r in required:
-                if r not in payload:
-                    return Response({"error": f"Missing field: {r}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Helper to grabbing fields regardless of casing (camelCase vs snake_case)
+            def g(*names, default=None):
+                for n in names:
+                    if n in payload and payload[n] is not None:
+                        return payload[n]
+                return default
+
+            claim_id = g("ClaimID", "claim_id")
+            customer_id = g("CustomerID", "customer_id")
+            policy_id = g("PolicyID", "policy_id")
+            amount = g("Amount", "amount")
+            reason = g("Reason", "reason")
+            assigned_to = g("AssignedToUserID", "assigned_to_user_id")
+            item_ids = g("ItemIDs", "item_ids", default=[])
+            status_str = g("Status", "status", default="submitted")
+
+            # Logic specifically for Customers creating their own claim
+            if is_customer:
+                own_ids = list(_own_customer_ids(user) or [])
+                if not own_ids:
+                    return Response({"error": "No associated customer record"}, status=status.HTTP_400_BAD_REQUEST)
+                # If they didn't send an ID, use their first one.
+                if customer_id is None:
+                    customer_id = own_ids[0]
+                # Security check: Prevent them from creating a claim for someone else
+                if int(customer_id) not in own_ids:
+                    return Response({"error": "Forbidden: invalid customer context"}, status=status.HTTP_403_FORBIDDEN)
+                # Customers can't assign the claim, it goes to the pool (None)
+                assigned_to = None
+
+            # Validation
+            if customer_id is None:
+                return Response({"error": "Missing field: CustomerID"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate ID if missing
+            if claim_id is None:
+                claim_id = _new_log_id()
+
+            # Type conversion
+            claim_id = int(claim_id)
+            customer_id = int(customer_id)
+            policy_id = int(policy_id) if policy_id is not None and str(policy_id) != "" else None
+
+            # If agent creates it, they can assign it to themselves automatically
+            assigned_to = int(assigned_to) if assigned_to is not None and str(assigned_to) != "" else (
+                user.userid if _is_agent(user) and not is_customer else None)
+
+            amount = float(amount) if amount is not None and str(amount) != "" else None
+            item_ids = list(item_ids or [])
+
+            # Check if this ID is already taken
+            if Claim.objects(ClaimID=claim_id).first():
+                return Response({"error": "ClaimID already exists"}, status=status.HTTP_409_CONFLICT)
+
             claim = Claim(
-                ClaimID=int(payload["ClaimID"]),
-                CustomerID=int(payload["CustomerID"]),
-                PolicyID=int(payload["PolicyID"]) if payload.get("PolicyID") is not None else None,
-                AssignedToUserID=int(payload.get("AssignedToUserID") or user.userid),
-                Status=str(payload.get("Status") or "submitted"),
-                Reason=payload.get("Reason"),
-                Amount=float(payload.get("Amount")) if payload.get("Amount") is not None else None,
-                ItemIDs=list(payload.get("ItemIDs") or []),
+                ClaimID=claim_id,
+                CustomerID=customer_id,
+                PolicyID=policy_id,
+                AssignedToUserID=assigned_to,
+                Status=str(status_str or "submitted"),
+                Reason=reason,
+                Amount=amount,
+                ItemIDs=item_ids,
                 CreatedAt=_now_utc(),
                 UpdatedAt=_now_utc(),
             )
-            if Claim.objects(ClaimID=claim.ClaimID).first():
-                return Response({"error": "ClaimID already exists"}, status=status.HTTP_409_CONFLICT)
             claim.save()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -739,6 +821,7 @@ class ClaimListCreateView(APIView):
                 Details=None,
                 CreatedAt=_now_utc(),
             ).save()
+
             return Response({"created": True, "ClaimID": claim.ClaimID}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -746,43 +829,17 @@ class ClaimListCreateView(APIView):
 
 class ItemListCreateView(APIView):
     """
-    Handles listing all items and creating new items.
+    Standard List/Create view for Items (like cameras, laptops, etc.).
 
     GET:
     - Lists all items.
-    - Requires: Any authenticated user.
-    - Success JSON Output (200 OK):
-      {
-        "items": [
-          {
-            "ItemID": 10,
-            "Name": "Laptop",
-            "Description": "15in MacBook Pro",
-            "CustomerID": 456,
-            "Value": 2000.00
-          }
-        ]
-      }
+    - Output (200): { "items": [...] }
 
     POST:
     - Creates a new item.
-    - Requires: Manager-level permissions.
-    - Input JSON Body (ItemID and Name are required):
-      {
-        "ItemID": 11,
-        "Name": "Camera",
-        "Description": "DSLR Camera",
-        "CustomerID": 456,
-        "Value": 800.00
-      }
-    - Success JSON Output (201 Created):
-      {"created": true, "ItemID": 11}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Missing field: ItemID"}
-    - Failure JSON Output (409 Conflict):
-      {"error": "ItemID already exists"}
+    - Permission: Managers only.
+    - Input: {"ItemID": 11, "Name": "Camera", "Value": 800}.
+    - Output (201): {"created": true, "ItemID": 11}
     """
 
     def get(self, request):
@@ -827,6 +884,7 @@ class ItemListCreateView(APIView):
             if Item.objects(ItemID=item.ItemID).first():
                 return Response({"error": "ItemID already exists"}, status=status.HTTP_409_CONFLICT)
             item.save()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -836,6 +894,7 @@ class ItemListCreateView(APIView):
                 Details=None,
                 CreatedAt=_now_utc(),
             ).save()
+
             return Response({"created": True, "ItemID": item.ItemID}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -843,41 +902,20 @@ class ItemListCreateView(APIView):
 
 class ItemDetailView(APIView):
     """
-    Handles CRUD operations for a single item (identified by item_id).
+    CRUD for a single Item.
 
     GET:
-    - Retrieves details for a specific item.
-    - Permissions: Any authenticated user.
-    - Success JSON Output (200 OK):
-      {
-        "ItemID": 10,
-        "Name": "Laptop",
-        "Description": "15in MacBook Pro",
-        "CustomerID": 456,
-        "Value": 2000.00
-      }
-    - Failure JSON Output (404 Not Found):
-      {"error": "Item not found"}
+    - Get details.
+    - Output (200): JSON object of the item.
 
-    PUT / PATCH:
-    - Updates an item using the provided JSON body.
-    - Permissions: Manager-level.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Item not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    PUT:
+    - Update details (Manager only).
+    - Input: JSON body fields.
+    - Output (200): {"ok": true}
 
     DELETE:
-    - Deletes an item.
-    - Permissions: Manager-level.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Item not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Delete item (Manager only).
+    - Output (200): {"ok": true}
     """
 
     def get(self, request, item_id: int):
@@ -910,6 +948,7 @@ class ItemDetailView(APIView):
             if not i:
                 return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
             payload = request.data or {}
+
             if "Name" in payload:
                 i.Name = str(payload["Name"]) if payload["Name"] is not None else i.Name
             if "Description" in payload:
@@ -918,7 +957,9 @@ class ItemDetailView(APIView):
                 i.CustomerID = int(payload["CustomerID"]) if payload["CustomerID"] is not None else None
             if "Value" in payload:
                 i.Value = float(payload["Value"]) if payload["Value"] is not None else None
+
             i.save()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -963,51 +1004,43 @@ class ItemDetailView(APIView):
 
 class PolicyListCreateView(APIView):
     """
-    Handles listing and creation of policies.
+    List and Create Policies.
 
     GET:
-    - Lists all policies.
-    - Requires: Manager-level permissions.
-    - Success JSON Output (200 OK):
-      {
-        "policies": [
-          {
-            "PolicyID": 901,
-            "CustomerID": 456,
-            "Status": "pending",
-            "CreatedAt": "2025-11-13T14:30:00Z",
-            "UpdatedAt": "2025-11-13T14:30:00Z"
-          }
-        ]
-      }
+    - List policies.
+    - Managers/Admins see all. Agents see their assigned clients'. Customers see their own.
+    - Output (200): { "policies": [...] }
 
     POST:
-    - Creates a new policy.
-    - Requires: Manager-level permissions.
-    - Input JSON Body (PolicyID and CustomerID are required):
-      {
-        "PolicyID": 902,
-        "CustomerID": 457,
-        "Status": "pending"
-      }
-    - Success JSON Output (201 Created):
-      {"created": true, "PolicyID": 902}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
-    - Failure JSON Output (400 Bad Request):
-      {"error": "Missing field: PolicyID"}
-    - Failure JSON Output (409 Conflict):
-      {"error": "PolicyID already exists"}
+    - Create a policy.
+    - Permission: Managers only.
+    - Input: {"PolicyID": 902, "CustomerID": 457}.
+    - Output (201): {"created": true, "PolicyID": 902}
     """
 
     def get(self, request):
         user, err = _require_user(request)
         if err:
             return err
-        if not (_is_manager(user) or _is_admin(user)):
-            return Response({"error": "Forbidden"}, status=status.HTTP_4D03_FORBIDDEN)
         try:
-            policies = Policy.objects
+            q = {}
+            if _is_manager(user) or _is_admin(user):
+                # See all
+                pass
+            elif _is_agent(user):
+                # Only see policies for customers assigned to this agent
+                assigned_ids = list(_assigned_customer_ids(user) or [])
+                if not assigned_ids:
+                    return Response({"policies": []}, status=status.HTTP_200_OK)
+                q["CustomerID__in"] = assigned_ids
+            else:
+                # Customer sees only their own
+                own_ids = list(_own_customer_ids(user) or [])
+                if not own_ids:
+                    return Response({"policies": []}, status=status.HTTP_200_OK)
+                q["CustomerID__in"] = own_ids
+
+            policies = Policy.objects(**q)
             data = [
                 {
                     "PolicyID": p.PolicyID,
@@ -1060,43 +1093,20 @@ class PolicyListCreateView(APIView):
 
 class PolicyDetailView(APIView):
     """
-    Handles CRUD operations for a single policy (identified by policy_id).
+    CRUD for a single Policy.
 
     GET:
-    - Retrieves details for a specific policy.
-    - Permissions: Manager-level.
-    - Success JSON Output (200 OK):
-      {
-        "PolicyID": 901,
-        "CustomerID": 456,
-        "Status": "pending",
-        "CreatedAt": "2025-11-13T14:30:00Z",
-        "UpdatedAt": "2025-11-13T14:30:00Z"
-      }
-    - Failure JSON Output (404 Not Found):
-      {"error": "Policy not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Get policy details.
+    - Output (200): JSON object of the policy.
 
-    PUT / PATCH:
-    - Updates a policy using the provided JSON body.
-    - Permissions: Manager-level.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Policy not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    PUT:
+    - Update policy (Manager only).
+    - Input: JSON body fields.
+    - Output (200): {"ok": true}
 
     DELETE:
-    - Deletes a policy.
-    - Permissions: Admin only.
-    - Success JSON Output (200 OK):
-      {"ok": true}
-    - Failure JSON Output (404 Not Found):
-      {"error": "Policy not found"}
-    - Failure JSON Output (403 Forbidden):
-      {"error": "Forbidden"}
+    - Delete policy (Admin only).
+    - Output (200): {"ok": true}
     """
 
     def get(self, request, policy_id: int):
@@ -1125,18 +1135,21 @@ class PolicyDetailView(APIView):
         if err:
             return err
         if not (_is_manager(user) or _is_admin(user)):
-            return Response({"error": "Forbidden"}, status=status.HTTP_4D03_FORBIDDEN)
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
             p = Policy.objects(PolicyID=int(policy_id)).first()
             if not p:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
             payload = request.data or {}
+
             if "CustomerID" in payload:
                 p.CustomerID = int(payload["CustomerID"]) if payload["CustomerID"] is not None else p.CustomerID
             if "Status" in payload:
                 p.Status = str(payload["Status"]) if payload["Status"] is not None else p.Status
+
             p.UpdatedAt = _now_utc()
             p.save()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
@@ -1165,6 +1178,7 @@ class PolicyDetailView(APIView):
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
             pid = p.PolicyID
             p.delete()
+
             AuditLog(
                 LogID=_new_log_id(),
                 ActorUserID=user.userid,
