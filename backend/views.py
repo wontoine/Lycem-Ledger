@@ -11,7 +11,7 @@ class HelloWorldView(APIView):
     """
     Simple test endpoint to make sure Django REST Framework is working
     """
-    
+
     def get(self, request):
         return Response({
             'message': 'Hello World!',
@@ -31,18 +31,18 @@ class LoginView(APIView):
         username = request.data.get('username')
         email = request.data.get('email')
         password = request.data.get('password')
-        
+
         # User must provide either username or email
         if not (username or email):
             return Response({
                 'error': 'Username or email is required'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if not password:
             return Response({
                 'error': 'Password is required'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Find user by username or by customer email (authoritative)
         try:
             user = None
@@ -69,17 +69,17 @@ class LoginView(APIView):
             return Response({
                 'error': 'Database connection error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
         if not user:
             return Response({
                 'error': 'Invalid credentials'
             }, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         if not user.isEnabled:
             return Response({
                 'error': 'Account is disabled'
             }, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         # Check password
         if not user.check_password(password):
             return Response({
@@ -92,7 +92,10 @@ class LoginView(APIView):
                 'userid': user.userid,
                 'username': user.username,
                 'email': cust_email,
+                # Provide both role name and numeric ID sourced from MongoDB
                 'role': user.role_name,
+                'accountType': user.role_name,  # alias expected by some frontend code
+                'roleID': getattr(user, 'roleID', None),
                 'isEnabled': user.isEnabled
             }
         }, status=status.HTTP_200_OK)
@@ -102,13 +105,13 @@ class HealthCheckView(APIView):
     """
     Health check endpoint to verify MongoDB connection
     """
-    
+
     def get(self, request):
         try:
             # Test MongoDB connection
             user_count = User.objects.count()
             role_count = Role.objects.count()
-            
+
             return Response({
                 'status': 'healthy',
                 'mongodb': 'connected',

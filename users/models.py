@@ -29,7 +29,7 @@ class Role(Document):
     RoleName = StringField(required=True, max_length=50)
 
     meta = {
-        'collection': 'Roles',
+        'collection': 'roles',
         'indexes': ['roleID']
     }
 
