@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-// Import necessary Router components
-import { useNavigate, BrowserRouter, Routes, Route } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import SubmitClaimModal from "./submitClaim";
 
 // --- Component Definition ---
@@ -8,26 +7,38 @@ import SubmitClaimModal from "./submitClaim";
 function UserHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [policies, setPolicies] = useState([]); // State to hold policy data
-  const [loading, setLoading] = useState(true); // State for loading indicator
-  const [fetchError, setFetchError] = useState(null); // State for errors
+  const [policies, setPolicies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [selectedPolicy, setSelectedPolicy] = useState(null);
 
-  // useNavigate is now safe to use because the component is rendered inside <BrowserRouter>
   const navigate = useNavigate();
-  // Retrieve the stored userID for authentication/filtering
   const storedUserID = localStorage.getItem("userID");
 
   const navItems = [
-    { name: "Policies", path: "/policies" },
-    { name: "Claims", path: "/claims" },
-    { name: "Submit Claim", path: "#" },
+    { name: "Policies", path: "/policies", icon: "📄" },
+    { name: "Claims", path: "/claims", icon: "🛡️" },
+    { name: "Submit Claim", path: "#", icon: "➕" },
   ];
 
-  // --- Policy Data Fetching using useEffect ---
+  // --- 1. NEW: Handle Logout Logic ---
+  const handleLogout = () => {
+    // A. Clear the stored ID
+    localStorage.removeItem("userID");
+
+    // B. Optional: clear other items if you have them
+    // localStorage.clear();
+
+    // C. Redirect to Login Page
+    navigate("/");
+  };
+  // ----------------------------------
+
   useEffect(() => {
     if (!storedUserID) {
       setLoading(false);
-      setFetchError("User ID not found. Please log in.");
+      // If no ID, redirect immediately (security best practice)
+      navigate("/");
       return;
     }
 
@@ -42,33 +53,23 @@ function UserHomePage() {
           },
         });
 
-        // 1. Get raw text to debug the server response
         const text = await response.text();
-        console.log("Server Response:", text); // <--- LOOK AT THIS IN YOUR BROWSER CONSOLE
 
         let data = [];
         let parseSuccess = false;
 
-        // 2. Try to parse it
         try {
           data = JSON.parse(text);
           parseSuccess = true;
         } catch (err) {
-          console.error(
-            "This is not JSON! It is likely an HTML error page.",
-            err
-          );
+          console.error("Not JSON:", err);
         }
 
-        // 3. Logic: If parse succeeded and we have data, use it. Otherwise, use Mock.
         if (parseSuccess && Array.isArray(data) && data.length > 0) {
           setPolicies(data);
           setFetchError(null);
         } else {
-          console.warn(
-            "Using Mock Data because API returned empty or invalid JSON."
-          );
-          // Define Mock Data here
+          // Mock Data Fallback
           const mockPolicies = [
             {
               policy_id: "P001",
@@ -86,14 +87,6 @@ function UserHomePage() {
               start_date: "2024-05-15",
               premium: 800,
             },
-            {
-              policy_id: "P003",
-              policy_name: "Life Basic",
-              status: "Active",
-              coverage_amount: 250000,
-              start_date: "2023-11-20",
-              premium: 450,
-            },
           ];
           setPolicies(mockPolicies);
         }
@@ -106,23 +99,24 @@ function UserHomePage() {
     };
 
     fetchPolicies();
-  }, [storedUserID]);
+  }, [storedUserID, navigate]);
 
-  // --- Handlers ---
   const handleNavItemClick = (item) => {
     if (item.name === "Submit Claim") {
       setIsModalOpen(true);
     } else {
       setSidebaropen(false);
       if (item.path && item.path !== "#") {
-        navigate(item.path); // Use navigate only if a path exists
+        navigate(item.path);
       }
     }
   };
 
-  // --- Policy Card Renderer Component (Nested) ---
-  const PolicyCard = ({ policy }) => (
-    <div className="bg-white p-6 shadow-lg rounded-xl border border-blue-100 hover:shadow-xl transition duration-200 cursor-pointer">
+  const PolicyCard = ({ policy, onClick }) => (
+    <div
+      onClick={onClick}
+      className="bg-white p-6 shadow-lg rounded-xl border border-blue-100 hover:shadow-xl transition duration-200 cursor-pointer"
+    >
       <div className="flex justify-between items-start mb-4">
         <h2 className="text-xl font-extrabold text-blue-700 truncate">
           {policy.policy_name || `Policy #${policy.policy_id}`}
@@ -164,59 +158,58 @@ function UserHomePage() {
     </div>
   );
 
-  // --- JSX Rendering ---
   return (
     <div className="flex bg-gray-100 min-h-screen">
       {/* Sidebar */}
       <div
-        className={`fixed bg-white w-64 h-full shadow-2xl transition-transform duration-300 ease-in-out z-40 ${
+        className={`fixed bg-white w-64 h-screen shadow-2xl transition-transform duration-300 ease-in-out z-40 flex flex-col ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
         } lg:static lg:w-64 lg:translate-x-0`}
       >
         <div className="p-4 flex justify-between items-center border-b">
-          <div className="text-2xl font-extrabold text-blue-600">
-            {" "}
-            InsureApp{" "}
-          </div>
+          <div className="text-2xl font-extrabold text-blue-600">InsureApp</div>
           <button
             className="lg:hidden p-1"
             onClick={() => setSidebaropen(false)}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            ✕
           </button>
         </div>
-        <div className="p-4 space-y-2">
+
+        <div className="p-4 space-y-2 flex-1">
           {navItems.map((item) => (
             <button
               key={item.name}
               className="flex items-center w-full text-left p-3 rounded-lg text-gray-700 hover:bg-blue-100 hover:text-blue-700 transition duration-150"
               onClick={() => handleNavItemClick(item)}
             >
-              <div className="text-xl mr-3">{item.icon}</div>
+              <span className="text-xl mr-3">{item.icon}</span>
               <div className="font-semibold">{item.name}</div>
             </button>
           ))}
         </div>
-        <div className="absolute bottom-4 left-4 text-sm text-gray-500">
-          User ID: {storedUserID ? storedUserID.substring(0, 8) + "..." : "N/A"}
+
+        {/* --- 2. NEW: Sign Out Button Section --- */}
+        <div className="p-4 border-t border-gray-200">
+          <button
+            onClick={handleLogout}
+            className="flex items-center w-full text-left p-3 rounded-lg text-gray-600 hover:bg-red-50 hover:text-red-600 transition duration-150 group"
+          >
+            <span className="text-xl mr-3 group-hover:scale-110 transition-transform">
+              🚪
+            </span>
+            <div className="font-bold">Sign Out</div>
+          </button>
+
+          <div className="mt-4 text-xs text-gray-400 px-2">
+            User ID: {storedUserID ? storedUserID : "N/A"}
+          </div>
         </div>
+        {/* --------------------------------------- */}
       </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto h-screen flex flex-col">
         <header className="sticky top-0 bg-white flex justify-between items-center p-4 shadow-md z-30">
           <button
             className="p-2 text-xl font-bold lg:hidden rounded-lg hover:bg-gray-100"
@@ -227,17 +220,19 @@ function UserHomePage() {
           <h1 className="text-2xl font-extrabold text-gray-800">
             Policies Dashboard
           </h1>
-          <div className="bg-blue-500 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">
+          <div
+            className="bg-blue-500 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold cursor-default"
+            title={`User ${storedUserID}`}
+          >
             {storedUserID ? storedUserID[0].toUpperCase() : "U"}
           </div>
         </header>
 
-        <div className="p-6">
+        <div className="p-6 flex-1 overflow-y-auto">
           <h2 className="text-2xl font-bold text-gray-800 mb-6">
             Your Active Policies
           </h2>
 
-          {/* Conditional Rendering based on state */}
           {loading && (
             <div className="text-center p-10 text-gray-500 text-lg">
               Loading policies...
@@ -265,23 +260,31 @@ function UserHomePage() {
             </div>
           )}
 
-          {/* Policy Cards Grid: Dynamic Policy Card Rendering */}
-          <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-10">
             {policies.map((policy) => (
-              <PolicyCard key={policy.policy_id} policy={policy} />
+              <PolicyCard
+                key={policy.policy_id}
+                policy={policy}
+                onClick={() => {
+                  console.log("Policy clicked:", policy.policy_id);
+                  setSelectedPolicy(policy);
+                  setIsModalOpen(true);
+                }}
+              />
             ))}
           </div>
         </div>
       </main>
 
-      {/* Submit Claim Modal */}
       {isModalOpen && (
         <SubmitClaimModal
           onClose={() => setIsModalOpen(false)}
           userID={storedUserID}
+          selectedPolicy={selectedPolicy}
         />
       )}
     </div>
   );
 }
+
 export default UserHomePage;

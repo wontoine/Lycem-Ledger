@@ -1,31 +1,42 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 function ManagerHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [activeTab, setActiveTab] = useState("approvals");
-
-  // Data States
   const [pendingPolicies, setPendingPolicies] = useState([]);
   const [agents, setAgents] = useState([]);
   const [allPolicies, setAllPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
+  const [processingId, setProcessingId] = useState(null);
+  const [assignmentSelections, setAssignmentSelections] = useState({});
 
-  // UI States
-  const [processingId, setProcessingId] = useState(null); // To show spinner on specific buttons
-  const [assignmentSelections, setAssignmentSelections] = useState({}); // Map: { policyID: agentID }
+  const navigate = useNavigate();
 
-  const storedUserID = localStorage.getItem("userID") || "3";
+  const storedUserID = localStorage.getItem("userID");
+
+  useEffect(() => {
+    if (!storedUserID) {
+      navigate("/", { replace: true });
+    }
+  }, [storedUserID, navigate]);
 
   const navItems = [
-    { id: "approvals", name: "Pending Approvals", icon: "🛡️" },
-    { id: "assign", name: "Assign Policies", icon: "👤" },
-    { id: "overview", name: "Agent Overview", icon: "📊" },
+    { id: "approvals", name: "Pending Approvals" },
+    { id: "assign", name: "Assign Policies" },
+    { id: "overview", name: "Agent Overview" },
   ];
 
-  // --- Data Fetching ---
+  const handleSignOut = () => {
+    localStorage.removeItem("userID");
+    localStorage.removeItem("userRoleID");
+    navigate("/", { replace: true });
+  };
 
   const fetchData = async () => {
+    if (!storedUserID) return;
+
     setLoading(true);
     setFetchError(null);
 
@@ -35,7 +46,6 @@ function ManagerHomePage() {
         "x-user-id": String(storedUserID),
       };
 
-      // Use Promise.all to fetch in parallel for better performance
       const [pendingRes, agentsRes, allPolRes] = await Promise.all([
         fetch("http://127.0.0.1:8000/api/manager/policies/pending/", {
           headers,
@@ -48,7 +58,6 @@ function ManagerHomePage() {
       const agentsData = await agentsRes.json();
       const allPolData = await allPolRes.json();
 
-      // Set Data or Fallbacks
       setPendingPolicies(pendingData.policies || []);
       setAgents(agentsData.employees || []);
       setAllPolicies(allPolData.policies || []);
@@ -56,7 +65,6 @@ function ManagerHomePage() {
       console.error("Fetch error:", error);
       setFetchError("Could not load live data. Using offline mode.");
 
-      // Mocks
       setPendingPolicies([
         {
           PolicyID: 901,
@@ -86,10 +94,8 @@ function ManagerHomePage() {
     fetchData();
   }, [storedUserID]);
 
-  // --- Actions ---
-
   const handleDecision = async (policyId, decision) => {
-    setProcessingId(policyId); // Start loading spinner for this specific card
+    setProcessingId(policyId);
     try {
       const response = await fetch(
         `http://127.0.0.1:8000/api/policies/${policyId}/decision/`,
@@ -107,7 +113,6 @@ function ManagerHomePage() {
         setPendingPolicies((prev) =>
           prev.filter((p) => p.PolicyID !== policyId)
         );
-        // Optional: Also update 'allPolicies' if you want the history to reflect the change immediately
       } else {
         alert("Failed to submit decision. Server returned an error.");
       }
@@ -119,7 +124,6 @@ function ManagerHomePage() {
     }
   };
 
-  // Handle Select Change for Assignment
   const handleSelectionChange = (policyId, agentId) => {
     setAssignmentSelections((prev) => ({
       ...prev,
@@ -134,29 +138,41 @@ function ManagerHomePage() {
     setProcessingId(policyId);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/policies/${policyId}/`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": String(storedUserID),
+          },
 
-      // Update local state
+          body: JSON.stringify({ AssignedAgentID: agentId }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to assign");
+      }
+
       setAllPolicies((prev) =>
         prev.map((p) =>
           p.PolicyID === policyId ? { ...p, AssignedAgentID: agentId } : p
         )
       );
-
-      // Clear selection
       setAssignmentSelections((prev) => {
         const newState = { ...prev };
         delete newState[policyId];
         return newState;
       });
     } catch (error) {
-      alert("Failed to assign agent.");
+      console.error(error);
+      alert("Failed to assign agent: " + error.message);
     } finally {
       setProcessingId(null);
     }
   };
-
-  // --- Renderers ---
 
   const renderApprovalCard = (policy) => (
     <div
@@ -206,7 +222,6 @@ function ManagerHomePage() {
   );
 
   const renderAssignTab = () => {
-    // Filter: Policies that exist but have no assigned agent
     const policiesToAssign = allPolicies.filter(
       (p) => !p.AssignedAgentID && p.Status !== "rejected"
     );
@@ -372,10 +387,8 @@ function ManagerHomePage() {
     );
   };
 
-  // --- Main Layout ---
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
-      {/* Sidebar */}
       <div
         className={`fixed inset-y-0 left-0 bg-white w-64 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -415,20 +428,16 @@ function ManagerHomePage() {
           ))}
         </nav>
 
-        <div className="absolute bottom-6 left-6 w-52">
-          <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
-            <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold border border-purple-200">
-              M
-            </div>
-            <div>
-              <p className="text-sm font-bold text-gray-700">Manager</p>
-              <p className="text-xs text-gray-400">ID: {storedUserID}</p>
-            </div>
-          </div>
+        <div className="absolute bottom-6 left-0 w-full px-6">
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-red-50 text-red-600 font-semibold rounded-lg hover:bg-red-100 transition duration-200"
+          >
+            <span></span> Sign Out
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm z-30 p-4 flex items-center justify-between lg:justify-end">
           <button
@@ -437,13 +446,27 @@ function ManagerHomePage() {
           >
             ☰
           </button>
-          <div className="flex items-center gap-4 mr-auto lg:mr-0 lg:ml-auto">
+          <div className="flex items-center gap-6 mr-auto lg:mr-0 lg:ml-auto">
             <button
               onClick={fetchData}
               className="text-sm text-blue-600 hover:underline flex items-center gap-1"
             >
               ↻ Refresh Data
             </button>
+
+            <div className="flex items-center gap-3 py-1 px-3 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold border border-purple-200 text-sm">
+                M
+              </div>
+              <div>
+                <p className="text-sm font-bold text-gray-700 leading-none">
+                  Manager
+                </p>
+                <p className="text-xs text-gray-400 leading-none mt-1">
+                  ID: {storedUserID}
+                </p>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -477,7 +500,7 @@ function ManagerHomePage() {
                 <div>
                   {pendingPolicies.length === 0 ? (
                     <div className="text-center p-12 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
-                      <div className="text-4xl mb-4">🎉</div>
+                      <div className="text-4xl mb-4"></div>
                       No pending policies found. Good job!
                     </div>
                   ) : (
