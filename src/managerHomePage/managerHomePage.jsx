@@ -58,6 +58,7 @@ function ManagerHomePage() {
       const agentsData = await agentsRes.json();
       const allPolData = await allPolRes.json();
 
+      console.log("Fetched Data:", { pendingData, agentsData, allPolData });
       setPendingPolicies(pendingData.policies || []);
       setAgents(agentsData.employees || []);
       setAllPolicies(allPolData.policies || []);

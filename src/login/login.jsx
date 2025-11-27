@@ -66,9 +66,19 @@ const Login = () => {
             navigate("/home");
             localStorage.setItem("userID", data.user.userid);
             localStorage.setItem("userRoleID", data.user.roleID);
+          } else if (data.user.roleID === 2) {
+            console.log(data);
+            navigate("/agentHomePage");
+            localStorage.setItem("userID", data.user.userid);
+            localStorage.setItem("userRoleID", data.user.roleID);
           } else if (data.user.roleID === 3) {
             console.log(data);
             navigate("/managerHomePage");
+            localStorage.setItem("userID", data.user.userid);
+            localStorage.setItem("userRoleID", data.user.roleID);
+          } else if (data.user.roleID === 4) {
+            console.log(data);
+            navigate("/adminHomePage");
             localStorage.setItem("userID", data.user.userid);
             localStorage.setItem("userRoleID", data.user.roleID);
           } else {
