@@ -2,12 +2,20 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ParseError
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.conf import settings
 from django.core.mail import send_mail
 import json
 from urllib.parse import parse_qs
+import os
+import re
+import uuid
+from pathlib import Path
 
-from users.models import User, Role, Customer, CustomerPlan
+from users.models import User, Role, Customer, CustomerPlan, InsurancePlan, Item, ClaimRecord, Agent, ClaimWorkflowHistory
+from django.utils import timezone
+from decimal import Decimal
+from datetime import datetime
 from .serializers import (
     LoginSerializer,
     CreateAccountSerializer,
@@ -586,12 +594,505 @@ class CustomerPlansView(APIView):
 
         plans_list = [_plan_to_dict(p) for p in plans]
 
+        # Enrich with plan names from insurancePlans
+        plan_ids = {p.get("planID") for p in plans_list if p.get("planID") is not None}
+        plan_names = {}
+        if plan_ids:
+            try:
+                plan_docs = InsurancePlan.objects(__raw__={"planID": {"$in": list(plan_ids)}})
+                for doc in plan_docs:
+                    pid = _get(doc, "planID", "PlanID")
+                    pname = _get(doc, "PlanName", "plan_name")
+                    if pid is not None:
+                        plan_names[pid] = pname
+            except Exception:
+                pass
+        for p in plans_list:
+            pid = p.get("planID")
+            if pid in plan_names:
+                p["planName"] = plan_names[pid]
+
         return Response(
             {
                 "userID": user_id,
                 "customerID": getattr(customer, "CustomerID", None),
                 "count": len(plans_list),
                 "plans": plans_list,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SubmitClaimView(APIView):
+    """
+    Customer claim submission.
+    - Validates that the userID maps to a customer.
+    - Validates that the policy (customerPlanID) belongs to that customer.
+    - Validates that the item belongs to that customer.
+    - Creates a claim in claimedItems with status = Filed (CurrentStatusID = 1).
+    - Marks the item as in-progress (sets ClaimStatus = 'In Progress').
+    """
+
+    def _validate_client_path(self, path_value):
+        """
+        Very basic validation to ensure client-provided paths are relative and safe.
+        """
+        if not path_value or not isinstance(path_value, str):
+            return None
+        path_value = path_value.strip()
+        # Reject absolute paths or traversal attempts
+        if path_value.startswith(("/", "\\")) or ".." in path_value:
+            return None
+        return path_value or None
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        required = ["userID", "policyID", "itemID", "amount", "reason"]
+        missing = [f for f in required if f not in data or data[f] in (None, "")]
+        if missing:
+            return Response({"error": {"missing": missing}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user_id = int(data.get("userID"))
+            policy_id = int(data.get("policyID"))
+            item_id = int(data.get("itemID"))
+        except (ValueError, TypeError):
+            return Response({"error": "userID, policyID, and itemID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(str(data.get("amount")))
+        except Exception:
+            return Response({"error": "amount must be numeric"}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = str(data.get("reason", "")).strip()
+        loss_date = data.get("lossDate")  # optional; accept ISO string
+
+        # Resolve customer by userID
+        try:
+            customer = Customer.objects(UserID=user_id).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not customer:
+            return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate policy belongs to this customer
+        try:
+            policy = CustomerPlan.objects(CustomerID=customer.CustomerID, CustomerPlanID=policy_id).first()
+            if not policy:
+                # fallback for mixed casing
+                policy = CustomerPlan.objects(__raw__={
+                    "CustomerID": customer.CustomerID,
+                    "$or": [
+                        {"CustomerPlanID": policy_id},
+                        {"customerPlanID": policy_id},
+                        {"planID": policy_id},
+                    ]
+                }).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not policy:
+            return Response({"error": "Policy not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate item belongs to this customer
+        try:
+            item = Item.objects(ItemID=item_id, CustomerID=customer.CustomerID).first()
+            if not item:
+                item = Item.objects(__raw__={"ItemID": item_id, "CustomerID": customer.CustomerID}).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not item:
+            return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Prevent duplicate open claims on the same item (status Filed=1, In Review=2)
+        try:
+            open_claim = ClaimRecord.objects(__raw__={
+                "ItemID": item_id,
+                "CurrentStatusID": {"$in": [1, 2]}
+            }).first()
+        except Exception:
+            open_claim = None
+
+        if open_claim:
+            return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
+
+        # Generate next ClaimID (simple max+1)
+        try:
+            last = ClaimRecord.objects.order_by("-ClaimID").first()
+            next_id = (last.ClaimID + 1) if last and getattr(last, "ClaimID", None) else 1
+        except Exception:
+            next_id = 1
+
+        now = timezone.now()
+        # Normalize loss_date if provided
+        loss_dt = None
+        if loss_date:
+            try:
+                loss_dt = datetime.fromisoformat(loss_date)
+            except Exception:
+                loss_dt = None
+
+        # Create claim record
+        try:
+            claim = ClaimRecord(
+                ClaimID=next_id,
+                ItemID=item_id,
+                CurrentStatusID=1,  # Filed
+                LossDate=loss_dt,
+                ClaimedValueAtTime=str(amount),
+                descriptionOfLoss=reason,
+                DateFiled=now,
+            )
+            claim.save()
+        except Exception as e:
+            msg = "Unable to create claim"
+            if settings.DEBUG:
+                msg = f"Create failed: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Mark item as in-progress (add a field without strict schema enforcement)
+        try:
+            setattr(item, "ClaimStatus", "In Progress")
+            item.save()
+        except Exception:
+            # best effort; do not fail claim creation if item update fails
+            pass
+
+        # Log workflow history (Filed) with agent/employee name resolved from assignment
+        try:
+            agent_name = None
+            agent_id = getattr(customer, "assignment", None) or getattr(customer, "Assignment", None)
+            if agent_id is not None:
+                ag = Agent.objects(__raw__={"$or": [{"agentID": agent_id}, {"AgentID": agent_id}]}).first()
+                if ag:
+                    fn = getattr(ag, "firstname", None) or getattr(ag, "firstName", None)
+                    ln = getattr(ag, "lastName", None) or getattr(ag, "lastname", None)
+                    agent_name = " ".join(filter(None, [fn, ln])) or getattr(ag, "email", None)
+            # Generate next HistoryID
+            try:
+                last_hist = ClaimWorkflowHistory.objects.order_by("-HistoryID").first()
+                next_hist = (last_hist.HistoryID + 1) if last_hist and getattr(last_hist, "HistoryID", None) else 1
+            except Exception:
+                next_hist = 1
+            hist = ClaimWorkflowHistory(
+                HistoryID=next_hist,
+                ClaimID=claim.ClaimID,
+                status="Filed",
+                EmployeeName=agent_name or "customer",
+                Timestamp=now,
+                Note="Initial claim submission by customer.",
+            )
+            hist.save()
+        except Exception:
+            # best effort; do not fail claim creation if history logging fails
+            pass
+
+        return Response(
+            {
+                "claimID": claim.ClaimID,
+                "status": "Filed",
+                "itemID": item_id,
+                "policyID": policy_id,
+                "customerID": getattr(customer, "CustomerID", None),
+                "amount": str(amount),
+                "reason": reason,
+                "lossDate": loss_dt.isoformat() if loss_dt else None,
+                "dateFiled": now.isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AddItemWithImagesView(APIView):
+    """
+    Add an item (for a given customerPlanID) with up to two images.
+    - Uses customerPlanID and customerID to ensure ownership.
+    - Accepts multipart/form-data with fields:
+      name (required), estimatedValue (required), customerPlanID (required),
+      description (optional), Category (optional), purchaseDate (optional ISO),
+      image1 (optional), image2 (optional)
+    - Allowed image types: jpeg, png; max size: 10 MB each.
+    - Stores two image paths on the item document (ImagePath1, ImagePath2).
+    """
+
+    parser_classes = [MultiPartParser, FormParser]
+    MAX_SIZE = 10 * 1024 * 1024  # 10 MB
+    ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
+
+    def _slug(self, text):
+        text = text.strip().lower()
+        text = re.sub(r"[^a-z0-9-_]+", "-", text)
+        return text or "file"
+
+    def _save_file(self, file_obj, customer_id, plan_id, item_id, base_name):
+        upload_root = os.environ.get("UPLOAD_ROOT") or getattr(settings, "UPLOAD_ROOT", None)
+        if not upload_root:
+            raise RuntimeError("UPLOAD_ROOT is not configured")
+
+        # Validate size
+        if hasattr(file_obj, "size") and file_obj.size > self.MAX_SIZE:
+            raise ValueError("File too large")
+
+        # Validate extension
+        ext = Path(file_obj.name).suffix.lower()
+        if ext not in self.ALLOWED_EXT:
+            raise ValueError("Unsupported file type")
+
+        safe_base = self._slug(base_name)
+        filename = f"{safe_base}{ext}"
+
+        item_folder = os.path.join(upload_root, "customers", str(customer_id), "plans", str(plan_id), "items", str(item_id))
+        os.makedirs(item_folder, exist_ok=True)
+        abs_path = os.path.join(item_folder, filename)
+        rel_path = os.path.relpath(abs_path, upload_root)
+
+        with open(abs_path, "wb") as out:
+            for chunk in file_obj.chunks():
+                out.write(chunk)
+
+        return rel_path  # relative to upload_root
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+
+        # Required fields
+        for field in ["name", "estimatedValue", "customerPlanID", "customerID"]:
+            if field not in data or data[field] in (None, ""):
+                return Response({"error": {field: "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = str(data.get("name")).strip()
+        description = str(data.get("description", "")).strip() if data.get("description") else None
+        category = str(data.get("Category", "")).strip() if data.get("Category") else None
+        try:
+            plan_id = int(data.get("customerPlanID"))
+        except Exception:
+            return Response({"error": {"customerPlanID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            customer_id = int(data.get("customerID"))
+        except Exception:
+            return Response({"error": {"customerID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            estimated_value = Decimal(str(data.get("estimatedValue")))
+        except Exception:
+            return Response({"error": {"estimatedValue": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Optional purchase date
+        purchase_date_raw = data.get("purchaseDate")
+        purchase_date = None
+        if purchase_date_raw:
+            try:
+                purchase_date = datetime.fromisoformat(purchase_date_raw)
+            except Exception:
+                return Response({"error": {"purchaseDate": "Invalid date format"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate policy exists (by plan_id) and matches the provided customerID
+        try:
+            policy = CustomerPlan.objects(__raw__={
+                "$or": [
+                    {"CustomerPlanID": plan_id},
+                    {"customerPlanID": plan_id},
+                    {"planID": plan_id},
+                ]
+            }).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not policy:
+            return Response({"error": "customerPlanID not found"}, status=status.HTTP_404_NOT_FOUND)
+        if getattr(policy, "CustomerID", None) != customer_id:
+            return Response({"error": "customerID does not match plan ownership"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate next ItemID (max+1)
+        try:
+            last = Item.objects.order_by("-ItemID").first()
+            next_id = (last.ItemID + 1) if last and getattr(last, "ItemID", None) else 1
+        except Exception:
+            next_id = 1
+
+        # Prepare image paths (either uploaded files or client-provided relative paths)
+        image_paths = []
+        for idx, field in enumerate(["image1", "image2"], start=1):
+            file_obj = request.FILES.get(field)
+            if file_obj:
+                try:
+                    rel = self._save_file(file_obj, customer_id, plan_id, next_id, f"{self._slug(name)}_img{idx}")
+                    image_paths.append(rel)
+                except ValueError as ve:
+                    return Response({"error": {field: str(ve)}}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    msg = "File upload failed"
+                    if settings.DEBUG:
+                        msg = f"Upload error: {e}"
+                    return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            else:
+                # Allow optional client-provided path in JSON (already stored somewhere else)
+                client_path = self._validate_client_path(data.get(f"imagePath{idx}"))
+                if not client_path:
+                    return Response({"error": {field: "Image is required"}}, status=status.HTTP_400_BAD_REQUEST)
+                image_paths.append(client_path)
+
+        # Create item (strict=False allows extra fields)
+        try:
+            item = Item(
+                ItemID=next_id,
+                Name=name,
+                Description=description,
+                CustomerID=customer_id,
+                CustomerPlanID=plan_id,
+                Category=category,
+                EstimatedValue=str(estimated_value),
+                PurchaseDate=purchase_date,
+            )
+            if image_paths:
+                # two slots: ImagePath1, ImagePath2
+                if len(image_paths) > 0:
+                    setattr(item, "ImagePath1", image_paths[0])
+                if len(image_paths) > 1:
+                    setattr(item, "ImagePath2", image_paths[1])
+            item.save()
+        except Exception as e:
+            msg = "Unable to create item"
+            if settings.DEBUG:
+                msg = f"Create failed: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(
+            {
+                "itemID": item.ItemID,
+                "name": name,
+                "description": description,
+                "category": category,
+                "customerPlanID": plan_id,
+                "customerID": customer_id,
+                "estimatedValue": str(estimated_value),
+                "purchaseDate": purchase_date.isoformat() if purchase_date else None,
+                "imagePath1": getattr(item, "ImagePath1", None),
+                "imagePath2": getattr(item, "ImagePath2", None),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PolicyDetailView(APIView):
+    """
+    Get a specific policy (customerPlan) and all items linked to it.
+    URL: /api/auth/policies/<int:customerPlanID>/
+    """
+
+    def get(self, request, customerPlanID):
+        plan_id = customerPlanID
+        # Fetch the policy (customerPlan)
+        try:
+            policy = CustomerPlan.objects(__raw__={
+                "$or": [
+                    {"CustomerPlanID": plan_id},
+                    {"customerPlanID": plan_id},
+                    {"planID": plan_id},
+                ]
+            }).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not policy:
+            return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        def _get(doc, *keys):
+            for k in keys:
+                val = getattr(doc, k, None)
+                if val is not None:
+                    return val
+                if hasattr(doc, "_data") and k in doc._data:
+                    val = doc._data.get(k)
+                    if val is not None:
+                        return val
+            return None
+
+        # Enrich with insurance plan info
+        plan_id_field = _get(policy, "planID", "PlanID")
+        plan_name = plan_desc = None
+        coverage = base_price = None
+        if plan_id_field is not None:
+            try:
+                ins = InsurancePlan.objects(__raw__={
+                    "$or": [
+                        {"planID": plan_id_field},
+                        {"PlanID": plan_id_field},
+                    ]
+                }).first()
+                if ins:
+                    plan_name = _get(ins, "PlanName", "plan_name")
+                    plan_desc = _get(ins, "Description", "description")
+                    coverage = _get(ins, "CoverageLim", "coverage_amount")
+                    base_price = _get(ins, "BasePrice", "premium")
+            except Exception:
+                pass
+
+        # Fetch items linked to this plan
+        try:
+            items = Item.objects(__raw__={
+                "$or": [
+                    {"CustomerPlanID": plan_id},
+                    {"planID": plan_id},
+                ]
+            })
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        def _item_to_dict(it):
+            return {
+                "itemID": _get(it, "ItemID", "itemID"),
+                "name": _get(it, "Name", "name"),
+                "description": _get(it, "Description", "description"),
+                "category": _get(it, "Category", "category"),
+                "purchaseDate": (_get(it, "PurchaseDate") or _get(it, "purchaseDate")),
+                "estimatedValue": _get(it, "EstimatedValue", "estimatedValue", "Value"),
+                "imagePath1": getattr(it, "ImagePath1", None),
+                "imagePath2": getattr(it, "ImagePath2", None),
+                "claimStatus": getattr(it, "ClaimStatus", None),
+            }
+
+        items_list = [_item_to_dict(it) for it in items]
+
+        policy_dict = {
+            "customerPlanID": _get(policy, "CustomerPlanID", "customerPlanID"),
+            "customerID": _get(policy, "CustomerID", "customerID"),
+            "planID": plan_id_field,
+            "startDate": _get(policy, "StartDate", "startDate"),
+            "endDate": _get(policy, "EndDate", "endDate"),
+            "currentPremium": _get(policy, "CurrentPremium", "currentPremium"),
+            "status": _get(policy, "Status", "status"),
+            "planName": plan_name,
+            "planDescription": plan_desc,
+            "coverageLimit": coverage,
+            "basePrice": base_price,
+        }
+
+        return Response(
+            {
+                "policy": policy_dict,
+                "items": items_list,
+                "count": len(items_list),
             },
             status=status.HTTP_200_OK,
         )

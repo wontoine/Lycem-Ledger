@@ -38,6 +38,28 @@ class Role(Document):
         return f"{self.RoleName} (ID: {self.roleID})"
 
 
+class Agent(Document):
+    """
+    Minimal agent document used for lookups (assignment -> agent name).
+    """
+    agentID = IntField(required=True, unique=True, db_field="agentID")
+    firstname = StringField(required=False, db_field="firstname")
+    lastName = StringField(required=False, db_field="lastName")
+    email = StringField(required=False, db_field="email")
+    phone = StringField(required=False, db_field="phone")
+    userID = IntField(required=False, db_field="userID")
+    TeamID = IntField(required=False, db_field="TeamID")
+
+    meta = {
+        'collection': 'agents',
+        'auto_create_index': False,
+        'strict': False,
+    }
+
+    def __str__(self):
+        return f"{self.firstname or ''} {self.lastName or ''}".strip() or f"Agent {self.agentID}"
+
+
 class Customer(Document):
     """
     Stores core customer data.
@@ -82,6 +104,23 @@ class CustomerPlan(Document):
 
     def __str__(self):
         return f"Plan {self.CustomerPlanID} -> Customer {self.CustomerID}"
+
+
+class InsurancePlan(Document):
+    """
+    Minimal insurancePlans document used to enrich customer plans.
+    """
+    PlanID = IntField(required=True, unique=True, db_field="planID")
+    PlanName = StringField(required=False, db_field="PlanName")
+
+    meta = {
+        'collection': 'insurancePlans',
+        'auto_create_index': False,
+        'strict': False,  # tolerate extra fields like Description, CoverageLim, BasePrice, etc.
+    }
+
+    def __str__(self):
+        return f"{self.PlanName or 'Unknown'} (ID: {self.PlanID})"
 
 
 class User(Document):
@@ -388,6 +427,57 @@ class Claim(Document):
         ],
         'strict': False,
     }
+
+
+class ClaimRecord(Document):
+    """
+    Represents a claim entry in the legacy claimedItems collection.
+    Only core fields declared; strict=False allows extra fields to live in the document.
+    """
+    ClaimID = IntField(required=True, unique=True, db_field="ClaimID")
+    ItemID = IntField(required=True, db_field="ItemID")
+    CurrentStatusID = IntField(required=True, db_field="CurrentStatusID")
+    LossDate = DateTimeField(required=False, db_field="LossDate")
+    ClaimedValueAtTime = StringField(required=False, db_field="ClaimedValueAtTime")
+    descriptionOfLoss = StringField(required=False, db_field="descriptionOfLoss")
+    DateFiled = DateTimeField(required=False, db_field="DateFiled")
+
+    meta = {
+        'collection': 'claimedItems',
+        'indexes': [
+            {'fields': ['ClaimID'], 'unique': True},
+            {'fields': ['ItemID']},
+            {'fields': ['CurrentStatusID']},
+        ],
+        'strict': False,
+        'auto_create_index': False,
+    }
+
+
+class ClaimWorkflowHistory(Document):
+    """
+    Logs actions taken on a claim.
+    """
+    HistoryID = IntField(required=True, unique=True, db_field="HistoryID")
+    ClaimID = IntField(required=True, db_field="ClaimID")
+    status = StringField(required=True, db_field="status")
+    EmployeeName = StringField(required=False, db_field="EmployeeName")
+    Timestamp = DateTimeField(required=False, db_field="Timestamp")
+    Note = StringField(required=False, db_field="Note")
+
+    meta = {
+        'collection': 'claimWorkflowHistory',
+        'indexes': [
+            {'fields': ['HistoryID'], 'unique': True},
+            {'fields': ['ClaimID']},
+            {'fields': ['status']},
+        ],
+        'strict': False,
+        'auto_create_index': False,
+    }
+
+    def __str__(self):
+        return f"{self.ClaimID} - {self.status}"
 
 
 class AuditLog(Document):
