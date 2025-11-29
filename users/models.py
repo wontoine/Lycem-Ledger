@@ -54,10 +54,37 @@ class Agent(Document):
         'collection': 'agents',
         'auto_create_index': False,
         'strict': False,
+        'indexes': [
+            {'fields': ['agentID'], 'unique': True},
+            {'fields': ['TeamID'], 'sparse': True},
+            {'fields': ['userID'], 'sparse': True},
+        ],
     }
 
     def __str__(self):
         return f"{self.firstname or ''} {self.lastName or ''}".strip() or f"Agent {self.agentID}"
+
+
+class Supervisor(Document):
+    """
+    Lightweight supervisor (manager) document.
+    Used for resolving team/assignment metadata in management flows.
+    """
+    UserID = IntField(required=True, db_field="UserID")
+    TeamID = IntField(required=False, null=True, db_field="TeamID")
+
+    meta = {
+        'collection': 'supervisors',
+        'auto_create_index': False,
+        'strict': False,
+        'indexes': [
+            {'fields': ['UserID']},
+            {'fields': ['TeamID'], 'sparse': True},
+        ],
+    }
+
+    def __str__(self):
+        return f"Supervisor UserID={self.UserID} TeamID={getattr(self, 'TeamID', None)}"
 
 
 class Customer(Document):
@@ -108,119 +135,22 @@ class CustomerPlan(Document):
 
 class InsurancePlan(Document):
     """
-<<<<<<< HEAD
     Minimal insurancePlans document used to enrich customer plans.
     """
     PlanID = IntField(required=True, unique=True, db_field="planID")
     PlanName = StringField(required=False, db_field="PlanName")
-=======
-    Lightweight model for insurance plans catalog.
-    We keep it flexible (strict=False) to match existing DB documents.
-
-    Example document:
-    { "planID": 1, "PlanName": "Basic Home", "Description": "...", "BasePrice": 500 }
-    """
-    planID = IntField(required=True, unique=True, db_field="planID")
-    PlanName = StringField(required=False, max_length=255)
->>>>>>> 787a560471e1e5fce9444edc7185b5381266c207
 
     meta = {
         'collection': 'insurancePlans',
         'auto_create_index': False,
-<<<<<<< HEAD
         'strict': False,  # tolerate extra fields like Description, CoverageLim, BasePrice, etc.
+        'indexes': [
+            {'fields': ['PlanID'], 'unique': True},
+        ],
     }
 
     def __str__(self):
         return f"{self.PlanName or 'Unknown'} (ID: {self.PlanID})"
-=======
-        'strict': False,
-        'indexes': [
-            {'fields': ['planID'], 'unique': True},
-        ],
-    }
-
-    def __str__(self):
-        return f"{getattr(self, 'PlanName', None) or 'Plan'} (ID: {self.planID})"
-
-
-class Supervisor(Document):
-    """
-    Lightweight model for supervisors (managers) metadata stored in MongoDB
-    collection 'supervisors'. We primarily need TeamID to determine which
-    customers (and thus customer plans) fall under a manager's responsibility.
-
-    Example document (flexible):
-    { "UserID": 3, "TeamID": 42, "Name": "Jane Manager", ... }
-    """
-    UserID = IntField(required=True, db_field="UserID")
-    TeamID = IntField(required=False, null=True, db_field="TeamID")
-
-    meta = {
-        'collection': 'supervisors',
-        'auto_create_index': False,
-        'strict': False,
-        'indexes': [
-            {'fields': ['UserID']},
-            {'fields': ['TeamID']},
-        ],
-    }
-
-    def __str__(self):
-        return f"Supervisor UserID={self.UserID} TeamID={getattr(self, 'TeamID', None)}"
-
-
-class Agent(Document):
-    """
-    Lightweight model to access the 'agents' collection.
-    We only need TeamID linkage and a way to correlate to Users (via UserID) for
-    manager-facing features like assignments.
-
-    Example document (flexible):
-    { "AgentID": 7, "UserID": 77, "TeamID": 1, "firstname": "Bob", ... }
-    """
-    AgentID = IntField(required=False, null=True, db_field="AgentID")
-    UserID = IntField(required=False, null=True, db_field="userID")
-    TeamID = IntField(required=False, null=True, db_field="TeamID")
-
-    meta = {
-        'collection': 'agents',
-        'auto_create_index': False,
-        'strict': False,
-        'indexes': [
-            {'fields': ['AgentID'], 'sparse': True},
-            # Use the MongoEngine attribute name 'UserID' (db_field maps to 'userID')
-            {'fields': ['UserID'], 'sparse': True},
-            {'fields': ['TeamID'], 'sparse': True},
-        ],
-    }
-
-    def __str__(self):
-        aid = getattr(self, 'AgentID', None)
-        uid = getattr(self, 'UserID', None)
-        tid = getattr(self, 'TeamID', None)
-        return f"Agent AgentID={aid} UserID={uid} TeamID={tid}"
-
-
-class PlanAgentAssignment(Document):
-    """
-    Represents the assignment registry. Per requirements, this collection only
-    stores the generated AssignmentID values.
-
-    Example document:
-    { "AssignmentID": 1001 }
-    """
-    AssignmentID = IntField(required=True, unique=True, db_field="AssignmentID")
-
-    meta = {
-        'collection': 'Plan_agent_Assignment',
-        'auto_create_index': False,
-        'strict': False,
-        'indexes': [
-            {'fields': ['AssignmentID'], 'unique': True},
-        ],
-    }
->>>>>>> 787a560471e1e5fce9444edc7185b5381266c207
 
 
 class User(Document):

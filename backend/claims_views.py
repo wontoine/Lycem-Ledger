@@ -1805,14 +1805,15 @@ class PolicyDetailView(APIView):
     - Output (200): {"ok": true}
     """
 
-    def get(self, request, policy_id: int):
+    def get(self, request, etc: int):
         user, err = _require_user(request)
         if err:
             return err
         if not (_is_manager(user) or _is_admin(user)):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
-            p = Policy.objects(PolicyID=int(policy_id)).first()
+            policy_id = int(etc)
+            p = Policy.objects(PolicyID=policy_id).first()
             if not p:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
             data = {
@@ -1826,14 +1827,15 @@ class PolicyDetailView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def put(self, request, policy_id: int):
+    def put(self, request, etc: int):
         user, err = _require_user(request)
         if err:
             return err
         if not (_is_manager(user) or _is_admin(user)):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
-            p = Policy.objects(PolicyID=int(policy_id)).first()
+            policy_id = int(etc)
+            p = Policy.objects(PolicyID=policy_id).first()
             if not p:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
             payload = request.data or {}
@@ -1859,17 +1861,18 @@ class PolicyDetailView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def patch(self, request, policy_id: int):
-        return self.put(request, policy_id)
+    def patch(self, request, etc: int):
+        return self.put(request, etc)
 
-    def delete(self, request, policy_id: int):
+    def delete(self, request, etc: int):
         user, err = _require_user(request)
         if err:
             return err
         if not _is_admin(user):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
-            p = Policy.objects(PolicyID=int(policy_id)).first()
+            policy_id = int(etc)
+            p = Policy.objects(PolicyID=policy_id).first()
             if not p:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
             pid = p.PolicyID
