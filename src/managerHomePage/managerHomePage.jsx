@@ -51,7 +51,9 @@ function ManagerHomePage() {
           headers,
         }),
         fetch("http://127.0.0.1:8000/api/manager/employees/", { headers }),
-        fetch("http://127.0.0.1:8000/api/policies/", { headers }),
+        fetch("http://127.0.0.1:8000/api/manager/policies/assignable/", {
+          headers,
+        }),
       ]);
 
       const pendingData = await pendingRes.json();
@@ -96,6 +98,7 @@ function ManagerHomePage() {
   }, [storedUserID]);
 
   const handleDecision = async (policyId, decision) => {
+    console.log(`Policy ${policyId} decision: ${decision}`);
     setProcessingId(policyId);
     try {
       const response = await fetch(

@@ -33,7 +33,7 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
       reason: claimData.Reason,
     };
 
-    const API_URL = "http://127.0.0.1:8000/api/claims/";
+    const API_URL = "http://127.0.0.1:8000/auth/claims/submit/";
 
     try {
       const response = await fetch(API_URL, {

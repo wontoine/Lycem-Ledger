@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SubmitClaimModal from "./submitClaim";
 
-// --- Helper Component: Policy Details Modal ---
 const PolicyDetailsModal = ({
   policyId,
   userID,
@@ -15,14 +14,15 @@ const PolicyDetailsModal = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSavingItem, setIsSavingItem] = useState(false);
 
-  // Text Inputs
+  // Form State
   const [newItem, setNewItem] = useState({
     name: "",
-    value: "",
+    estimatedValue: "",
     description: "",
+    category: "Electronics",
+    purchaseDate: "",
   });
 
-  // Image Inputs
   const [itemImages, setItemImages] = useState({
     image1: null,
     image2: null,
@@ -30,43 +30,23 @@ const PolicyDetailsModal = ({
 
   useEffect(() => {
     const fetchDetails = async () => {
-      // Mock Data for Details
-      const mockDetails = {
-        CustomerID: userID,
-        Status: "Active",
-        CreatedAt: "2024-01-01",
-        items: [
-          {
-            ItemID: 101,
-            Name: "MacBook Pro",
-            Value: 2500,
-            Description: "Electronics",
-          },
-          {
-            ItemID: 102,
-            Name: "Diamond Ring",
-            Value: 5000,
-            Description: "Jewelry",
-          },
-        ],
-      };
-
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/api/policies/${policyId}/`,
+          `http://127.0.0.1:8000/api/auth/policies/${policyId}`,
           {
-            headers: { "x-user-id": String(userID) },
+            headers: {
+              "Content-Type": "application/json",
+            },
           }
         );
+
         if (!response.ok) throw new Error("Fetch failed");
 
         const data = await response.json();
-        setDetails(data);
+        setDetails(data.policy || data);
         setItems(data.items || []);
       } catch (error) {
-        console.warn("Using Mock Data for Details:", error);
-        setDetails(mockDetails);
-        setItems(mockDetails.items);
+        console.warn("Error fetching policy details:", error);
       } finally {
         setLoading(false);
       }
@@ -84,7 +64,6 @@ const PolicyDetailsModal = ({
   const handleAddItem = async (e) => {
     e.preventDefault();
 
-    // Validation: Ensure both images are present
     if (!itemImages.image1 || !itemImages.image2) {
       alert("Please upload both required images.");
       return;
@@ -93,56 +72,57 @@ const PolicyDetailsModal = ({
     setIsSavingItem(true);
 
     try {
-      // Create FormData object to send files + text
       const formData = new FormData();
-      formData.append("policy_id", policyId);
+
+      const dateStr = newItem.purchaseDate
+        ? new Date(newItem.purchaseDate).toISOString().split(".")[0]
+        : new Date().toISOString().split(".")[0];
+
       formData.append("name", newItem.name);
-      formData.append("value", newItem.value);
+      formData.append("estimatedValue", newItem.estimatedValue);
+      formData.append("customerPlanID", policyId);
+      formData.append("customerID", userID);
       formData.append("description", newItem.description);
+      formData.append("Category", newItem.category);
+      formData.append("purchaseDate", dateStr);
       formData.append("image1", itemImages.image1);
       formData.append("image2", itemImages.image2);
 
-      const response = await fetch("http://127.0.0.1:8000/api/items/", {
-        method: "POST",
-        headers: {
-          // NOTE: Do NOT set Content-Type to application/json when sending FormData
-          // The browser will automatically set Content-Type: multipart/form-data
-          "x-user-id": String(userID),
-        },
-        body: formData,
-      });
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/auth/items/add/`,
+        {
+          customerID: userID,
+          customerPlanID: policyId,
+          method: "POST",
+          body: formData,
+        }
+      );
 
-      if (!response.ok) throw new Error("API Endpoint not available yet");
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText);
+      }
 
-      const savedItem = await response.json();
-      setItems([...items, savedItem]);
+      const savedData = await response.json();
+
+      // Update local list
+      const newItemObj = savedData.item || savedData;
+      setItems([...items, newItemObj]);
 
       // Reset Form
-      setNewItem({ name: "", value: "", description: "" });
+      setNewItem({
+        name: "",
+        estimatedValue: "",
+        description: "",
+        category: "Electronics",
+        purchaseDate: "",
+      });
       setItemImages({ image1: null, image2: null });
       setShowAddForm(false);
+      alert("Item added successfully!");
     } catch (error) {
-      console.warn("Using Local Fallback for Add Item:", error);
-
-      // Fallback: Create a mock object locally so the UI updates
-      const fallbackItem = {
-        ItemID: Date.now(),
-        Name: newItem.name,
-        Value: newItem.value,
-        Description: newItem.description,
-        // Create temporary URLs for the images so they could theoretically be displayed
-        Image1Url: itemImages.image1
-          ? URL.createObjectURL(itemImages.image1)
-          : null,
-        Image2Url: itemImages.image2
-          ? URL.createObjectURL(itemImages.image2)
-          : null,
-      };
-
-      setItems([...items, fallbackItem]);
-      setNewItem({ name: "", value: "", description: "" });
-      setItemImages({ image1: null, image2: null });
-      setShowAddForm(false);
+      console.error("Add Item Error:", error);
+      alert("Failed to add item. Please try again.");
     } finally {
       setIsSavingItem(false);
     }
@@ -153,59 +133,61 @@ const PolicyDetailsModal = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-fade-in-up max-h-[90vh] flex flex-col">
-        {/* Header */}
         <div className="bg-blue-600 p-6 flex justify-between items-start text-white shrink-0">
           <div>
             <h2 className="text-2xl font-bold">Policy Details</h2>
-            <p className="text-blue-100 text-sm">ID: {policyId}</p>
+            <p className="text-blue-100 text-sm">Policy ID: {policyId}</p>
           </div>
           <button
             onClick={onClose}
-            className="text-white hover:text-blue-200 text-2xl font-bold"
+            className="text-white hover:text-blue-200 text-2xl font-bold leading-none focus:outline-none"
+            title="Close"
           >
             ✕
           </button>
         </div>
 
-        {/* Body */}
-        <div className="p-6 overflow-y-auto">
+        <div className="p-6 overflow-y-auto flex-1">
           {loading ? (
             <div className="text-center py-10 text-gray-500">
               Loading details...
             </div>
           ) : details ? (
             <div className="space-y-6">
-              {/* Policy Info Grid */}
               <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-xl border border-blue-100">
                 <div>
                   <p className="text-xs font-bold text-blue-800 uppercase">
                     Status
                   </p>
                   <p className="text-gray-700 font-semibold">
-                    {details.Status || "Active"}
+                    {details.status || details.Status || "Active"}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-blue-800 uppercase">
-                    Customer ID
+                    Premium
                   </p>
                   <p className="text-gray-700 font-mono">
-                    {details.CustomerID}
+                    $
+                    {(
+                      details.currentPremium ||
+                      details.basePrice ||
+                      0
+                    ).toLocaleString()}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-blue-800 uppercase">
-                    Created At
+                    Start Date
                   </p>
                   <p className="text-gray-700">
-                    {details.CreatedAt
-                      ? new Date(details.CreatedAt).toLocaleDateString()
+                    {details.startDate
+                      ? new Date(details.startDate).toLocaleDateString()
                       : "N/A"}
                   </p>
                 </div>
               </div>
 
-              {/* Items Section */}
               <div>
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-lg font-bold text-gray-800">
@@ -213,56 +195,116 @@ const PolicyDetailsModal = ({
                   </h3>
                   <button
                     onClick={() => setShowAddForm(!showAddForm)}
-                    className="text-sm text-blue-600 hover:text-blue-800 font-semibold"
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-3 py-1.5 rounded-lg shadow transition"
                   >
                     {showAddForm ? "Cancel" : "+ Add Item"}
                   </button>
                 </div>
 
-                {/* Add Item Form */}
                 {showAddForm && (
                   <form
                     onSubmit={handleAddItem}
-                    className="bg-gray-100 p-4 rounded-lg mb-4 border border-gray-300"
+                    className="bg-gray-100 p-4 rounded-lg border border-gray-300 shadow-inner mb-4"
                   >
-                    {/* Text Fields */}
+                    <h4 className="font-bold text-gray-700 mb-3 border-b pb-1">
+                      New Item Details
+                    </h4>
+
                     <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <label className="text-xs font-bold text-gray-500">
+                          Item Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          className="w-full p-2 rounded border"
+                          value={newItem.name}
+                          onChange={(e) =>
+                            setNewItem({ ...newItem, name: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-500">
+                          Est. Value ($)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          className="w-full p-2 rounded border"
+                          value={newItem.estimatedValue}
+                          onChange={(e) =>
+                            setNewItem({
+                              ...newItem,
+                              estimatedValue: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <label className="text-xs font-bold text-gray-500">
+                          Category
+                        </label>
+                        <select
+                          className="w-full p-2 rounded border bg-white"
+                          value={newItem.category}
+                          onChange={(e) =>
+                            setNewItem({ ...newItem, category: e.target.value })
+                          }
+                        >
+                          <option value="Electronics">Electronics</option>
+                          <option value="Jewelry">Jewelry</option>
+                          <option value="Furniture">Furniture</option>
+                          <option value="Appliances">Appliances</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-500">
+                          Purchase Date
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          className="w-full p-2 rounded border"
+                          value={newItem.purchaseDate}
+                          onChange={(e) =>
+                            setNewItem({
+                              ...newItem,
+                              purchaseDate: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 3 */}
+                    <div className="mb-3">
+                      <label className="text-xs font-bold text-gray-500">
+                        Description
+                      </label>
                       <input
                         type="text"
-                        placeholder="Item Name"
-                        required
-                        className="p-2 rounded border"
-                        value={newItem.name}
+                        className="w-full p-2 rounded border"
+                        value={newItem.description}
                         onChange={(e) =>
-                          setNewItem({ ...newItem, name: e.target.value })
-                        }
-                      />
-                      <input
-                        type="number"
-                        placeholder="Value ($)"
-                        required
-                        className="p-2 rounded border"
-                        value={newItem.value}
-                        onChange={(e) =>
-                          setNewItem({ ...newItem, value: e.target.value })
+                          setNewItem({
+                            ...newItem,
+                            description: e.target.value,
+                          })
                         }
                       />
                     </div>
-                    <input
-                      type="text"
-                      placeholder="Description"
-                      className="w-full p-2 rounded border mb-3"
-                      value={newItem.description}
-                      onChange={(e) =>
-                        setNewItem({ ...newItem, description: e.target.value })
-                      }
-                    />
 
-                    {/* Image Uploads */}
+                    {/* Row 4: Images */}
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">
-                          Image 1 (Required)
+                        <label className="block text-xs font-bold text-gray-500 mb-1">
+                          Image 1 (Req)
                         </label>
                         <input
                           type="file"
@@ -273,8 +315,8 @@ const PolicyDetailsModal = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">
-                          Image 2 (Required)
+                        <label className="block text-xs font-bold text-gray-500 mb-1">
+                          Image 2 (Req)
                         </label>
                         <input
                           type="file"
@@ -289,20 +331,20 @@ const PolicyDetailsModal = ({
                     <button
                       type="submit"
                       disabled={isSavingItem}
-                      className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 font-bold disabled:bg-blue-400"
+                      className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 font-bold disabled:bg-gray-400 shadow"
                     >
-                      {isSavingItem ? "Saving..." : "Save Item"}
+                      {isSavingItem ? "Uploading..." : "Save Item"}
                     </button>
                   </form>
                 )}
 
-                {/* Items List */}
+                {/* Items Table */}
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm text-left">
                     <thead className="bg-gray-50 text-gray-500 font-bold">
                       <tr>
                         <th className="p-3">Item</th>
-                        <th className="p-3">Description</th>
+                        <th className="p-3">Category</th>
                         <th className="p-3 text-right">Value</th>
                       </tr>
                     </thead>
@@ -313,23 +355,33 @@ const PolicyDetailsModal = ({
                             colSpan="3"
                             className="p-4 text-center text-gray-400"
                           >
-                            No items listed on this policy.
+                            No items added yet.
                           </td>
                         </tr>
                       ) : (
                         items.map((item, idx) => (
                           <tr
-                            key={item.ItemID || idx}
+                            key={item.itemID || item.ItemID || idx}
                             className="hover:bg-gray-50"
                           >
-                            <td className="p-3 font-medium text-gray-800">
-                              {item.Name}
+                            <td className="p-3">
+                              <div className="font-medium text-gray-800">
+                                {item.name || item.Name}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {item.description || item.Description}
+                              </div>
                             </td>
-                            <td className="p-3 text-gray-500">
-                              {item.Description}
+                            <td className="p-3 text-gray-600">
+                              {item.category || item.Category || "N/A"}
                             </td>
                             <td className="p-3 text-right font-mono">
-                              ${item.Value?.toLocaleString()}
+                              $
+                              {(
+                                item.estimatedValue ||
+                                item.Value ||
+                                0
+                              ).toLocaleString()}
                             </td>
                           </tr>
                         ))
@@ -347,7 +399,7 @@ const PolicyDetailsModal = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0 flex justify-end gap-3">
+        <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0 flex justify-end gap-3 rounded-b-2xl">
           <button
             onClick={onClose}
             className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-200 rounded-lg transition"
@@ -367,14 +419,13 @@ const PolicyDetailsModal = ({
 };
 
 // --- Main Component ---
-
 function UserHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
 
   // Modals Control
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
-  const [selectedPolicyId, setSelectedPolicyId] = useState(null); // For Detail Modal
-  const [claimPolicyData, setClaimPolicyData] = useState(null); // Data to pass to Claim Modal
+  const [selectedPolicyId, setSelectedPolicyId] = useState(null);
+  const [claimPolicyData, setClaimPolicyData] = useState(null);
 
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -400,41 +451,28 @@ function UserHomePage() {
       return;
     }
 
-    const API_URL = `http://127.0.0.1:8000/api/policies/`;
+    // Fetch list of plans (Uses userID query param)
+    const API_URL = `http://127.0.0.1:8000/auth/customer/plans/?userID=${storedUserID}`;
 
     const fetchPolicies = async () => {
-      // Mock Data Fallback (Used if API fails)
+      // Mock Data Fallback
       const mockPolicies = [
         {
           policy_id: "P001",
-          policy_name: "Homeowner Plus",
+          policy_name: "Homeowner Plus (Mock)",
           status: "Active",
           coverage_amount: 500000,
           start_date: "2024-01-01",
           premium: 1200,
-        },
-        {
-          policy_id: "P002",
-          policy_name: "Auto Platinum",
-          status: "Pending",
-          coverage_amount: 50000,
-          start_date: "2024-05-15",
-          premium: 800,
-        },
-        {
-          policy_id: "P003",
-          policy_name: "Life Basic",
-          status: "Active",
-          coverage_amount: 250000,
-          start_date: "2023-11-20",
-          premium: 450,
         },
       ];
 
       try {
         const response = await fetch(API_URL, {
           method: "GET",
-          headers: { "x-user-id": String(storedUserID) },
+          headers: {
+            "Content-Type": "application/json",
+          },
         });
 
         if (!response.ok) throw new Error(`Server Status: ${response.status}`);
@@ -448,7 +486,11 @@ function UserHomePage() {
         }
 
         let finalPolicies = [];
-        if (data && Array.isArray(data.policies)) {
+
+        // Handle various API return shapes
+        if (data && Array.isArray(data.plans)) {
+          finalPolicies = data.plans;
+        } else if (data && Array.isArray(data.policies)) {
           finalPolicies = data.policies;
         } else if (Array.isArray(data)) {
           finalPolicies = data;
@@ -457,15 +499,11 @@ function UserHomePage() {
         if (finalPolicies.length > 0) {
           setPolicies(finalPolicies);
         } else {
-          console.log("API returned empty list. Switching to Mock Data.");
           setPolicies(mockPolicies);
         }
         setFetchError(null);
       } catch (error) {
-        console.warn(
-          "Network error or API unreachable. Switching to Mock Data.",
-          error
-        );
+        console.warn("Network error. Switching to Mock Data.", error);
         setPolicies(mockPolicies);
         setFetchError(null);
       } finally {
@@ -486,8 +524,13 @@ function UserHomePage() {
   };
 
   const handlePolicyClick = (policy) => {
-    const id = policy.PolicyID || policy.policy_id;
-    setSelectedPolicyId(id);
+    // Looks for keys in order: API (customerPlanID) -> Mock (PolicyID/policy_id)
+    const id = policy.customerPlanID || policy.PolicyID || policy.policy_id;
+    if (id) {
+      setSelectedPolicyId(id);
+    } else {
+      console.error("Clicked policy has no ID:", policy);
+    }
   };
 
   const handleOpenClaimFromDetails = (policyDetails) => {
@@ -503,12 +546,13 @@ function UserHomePage() {
     >
       <div className="flex justify-between items-start mb-4">
         <h2 className="text-xl font-extrabold text-blue-700 truncate group-hover:text-blue-800">
-          {policy.policy_name ||
-            `Policy #${policy.PolicyID || policy.policy_id}`}
+          {policy.planName ||
+            policy.policy_name ||
+            `Policy #${policy.customerPlanID || policy.PolicyID}`}
         </h2>
         <span
           className={`text-sm font-semibold px-3 py-1 rounded-full ${
-            (policy.status || policy.Status) === "Active"
+            (policy.status || policy.Status || "").toLowerCase() === "active"
               ? "bg-green-100 text-green-700"
               : "bg-yellow-100 text-yellow-700"
           }`}
@@ -520,22 +564,25 @@ function UserHomePage() {
       <p className="text-sm text-gray-500 mb-2">
         Policy ID:{" "}
         <span className="font-mono text-gray-700">
-          {policy.PolicyID || policy.policy_id}
+          {policy.customerPlanID || policy.PolicyID || policy.policy_id}
         </span>
       </p>
+
       <p className="text-3xl font-bold text-gray-900 mb-4">
         $
-        {policy.coverage_amount
-          ? policy.coverage_amount.toLocaleString()
-          : "N/A"}
+        {(
+          policy.currentPremium ||
+          policy.coverage_amount ||
+          0
+        ).toLocaleString()}
       </p>
 
       <div className="flex justify-between text-sm text-gray-600 border-t pt-4 mt-2">
         <div>
           <span className="font-medium">Start:</span>{" "}
-          {policy.start_date || policy.CreatedAt
+          {policy.startDate || policy.start_date || policy.CreatedAt
             ? new Date(
-                policy.start_date || policy.CreatedAt
+                policy.startDate || policy.start_date || policy.CreatedAt
               ).toLocaleDateString()
             : "N/A"}
         </div>
@@ -645,7 +692,9 @@ function UserHomePage() {
           <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-10">
             {policies.map((policy) => (
               <PolicyCard
-                key={policy.policy_id || policy.PolicyID}
+                key={
+                  policy.customerPlanID || policy.policy_id || policy.PolicyID
+                }
                 policy={policy}
                 onClick={() => handlePolicyClick(policy)}
               />
@@ -654,7 +703,7 @@ function UserHomePage() {
         </div>
       </main>
 
-      {/* Modals */}
+      {/* Detail Modal */}
       {selectedPolicyId && (
         <PolicyDetailsModal
           policyId={selectedPolicyId}
@@ -664,6 +713,7 @@ function UserHomePage() {
         />
       )}
 
+      {/* Claim Modal */}
       {isClaimModalOpen && (
         <SubmitClaimModal
           onClose={() => setIsClaimModalOpen(false)}
