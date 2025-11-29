@@ -440,12 +440,19 @@ class Item(Document):
     Description = StringField(required=False)
     CustomerID = IntField(required=False, null=True)
     Value = FloatField(required=False)
+    CustomerPlanID = IntField(required=False, null=True)
+    Category = StringField(required=False)
+    EstimatedValue = StringField(required=False)
+    PurchaseDate = StringField(required=False)  # store ISO string as provided
+    ImagePath1 = StringField(required=False)
+    ImagePath2 = StringField(required=False)
 
     meta = {
         'collection': 'items',
         'indexes': [
             {'fields': ['ItemID'], 'unique': True},
             {'fields': ['CustomerID'], 'sparse': True},
+            {'fields': ['CustomerPlanID'], 'sparse': True},
         ],
         'strict': False,
     }
