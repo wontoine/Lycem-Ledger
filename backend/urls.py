@@ -62,7 +62,7 @@ urlpatterns = [
     path("api/items/<int:item_id>/", ItemDetailView.as_view(), name="item-detail"),
     # Policies CRUD + manager approval endpoints
     path("api/policies/", PolicyListCreateView.as_view(), name="policies-list-create"),
-    path("api/policies/<int:policy_id>/", PolicyDetailView.as_view(), name="policy-detail"),
+    path("api/manager/policies/<int:policy_id>/", PolicyDetailView.as_view(), name="policy-detail"),
     path("api/manager/employees/", ManagerEmployeesView.as_view(), name="manager-employees"),
     path("api/manager/customers/unassigned/", ManagerUnassignedCustomersView.as_view(), name="manager-unassigned-customers"),
     path("api/manager/policies/", ManagerPoliciesView.as_view(), name="manager-policies"),
