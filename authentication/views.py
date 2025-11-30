@@ -835,7 +835,7 @@ class AddItemWithImagesView(APIView):
         text = re.sub(r"[^a-z0-9-_]+", "-", text)
         return text or "file"
 
-    def _save_file(self, file_obj, customer_id, plan_id, item_id, base_name):
+    def _save_file(self, file_obj, customer_id, plan_id, item_name_slug, idx):
         upload_root = os.environ.get("UPLOAD_ROOT") or getattr(settings, "UPLOAD_ROOT", None)
         if not upload_root:
             raise RuntimeError("UPLOAD_ROOT is not configured")
@@ -849,10 +849,18 @@ class AddItemWithImagesView(APIView):
         if ext not in self.ALLOWED_EXT:
             raise ValueError("Unsupported file type")
 
-        safe_base = self._slug(base_name)
-        filename = f"{safe_base}{ext}"
+        safe_base = self._slug(item_name_slug)
+        filename = f"{safe_base}_img{idx}{ext}"
 
-        item_folder = os.path.join(upload_root, "customers", str(customer_id), "plans", str(plan_id), "items", str(item_id))
+        item_folder = os.path.join(
+            upload_root,
+            "customers",
+            str(customer_id),
+            "plans",
+            str(plan_id),
+            "items",
+            safe_base,
+        )
         os.makedirs(item_folder, exist_ok=True)
         abs_path = os.path.join(item_folder, filename)
         rel_path = os.path.relpath(abs_path, upload_root)
@@ -896,6 +904,7 @@ class AddItemWithImagesView(APIView):
                 purchase_date = datetime.fromisoformat(purchase_date_raw)
             except Exception:
                 return Response({"error": {"purchaseDate": "Invalid date format"}}, status=status.HTTP_400_BAD_REQUEST)
+        purchase_date_str = purchase_date.isoformat() if purchase_date else None
 
         # Validate policy exists (by plan_id) and matches the provided customerID
         try:
@@ -930,7 +939,7 @@ class AddItemWithImagesView(APIView):
             file_obj = request.FILES.get(field)
             if file_obj:
                 try:
-                    rel = self._save_file(file_obj, customer_id, plan_id, next_id, f"{self._slug(name)}_img{idx}")
+                    rel = self._save_file(file_obj, customer_id, plan_id, self._slug(name), idx)
                     image_paths.append(rel)
                 except ValueError as ve:
                     return Response({"error": {field: str(ve)}}, status=status.HTTP_400_BAD_REQUEST)
@@ -956,7 +965,7 @@ class AddItemWithImagesView(APIView):
                 CustomerPlanID=plan_id,
                 Category=category,
                 EstimatedValue=str(estimated_value),
-                PurchaseDate=purchase_date,
+                PurchaseDate=purchase_date_str,
             )
             if image_paths:
                 # two slots: ImagePath1, ImagePath2
@@ -980,7 +989,7 @@ class AddItemWithImagesView(APIView):
                 "customerPlanID": plan_id,
                 "customerID": customer_id,
                 "estimatedValue": str(estimated_value),
-                "purchaseDate": purchase_date.isoformat() if purchase_date else None,
+                "purchaseDate": purchase_date_str,
                 "imagePath1": getattr(item, "ImagePath1", None),
                 "imagePath2": getattr(item, "ImagePath2", None),
             },
