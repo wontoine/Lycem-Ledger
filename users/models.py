@@ -202,6 +202,27 @@ class Agent(Document):
         return f"Agent AgentID={aid} UserID={uid} TeamID={tid}"
 
 
+class PlanAgentAssignment(Document):
+    """
+    Minimal registry for assignment IDs used by legacy Manager flows.
+    Keeping this model allows compatibility with Temp models and any
+    future features that rely on the Plan_agent_Assignment collection.
+
+    Example document:
+    { "AssignmentID": 1001 }
+    """
+    AssignmentID = IntField(required=True, unique=True, db_field="AssignmentID")
+
+    meta = {
+        'collection': 'Plan_agent_Assignment',
+        'auto_create_index': False,
+        'strict': False,
+        'indexes': [
+            {'fields': ['AssignmentID'], 'unique': True},
+        ],
+    }
+
+
 class User(Document):
     """
     Represents any user in the system (customers, agents, managers, etc.).

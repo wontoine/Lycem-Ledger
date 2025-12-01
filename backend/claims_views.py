@@ -4,7 +4,8 @@ from rest_framework import status
 from django.conf import settings
 
 from users.models import User, Claim, Item, Policy, AuditLog, Customer, CustomerPlan, InsurancePlan, Supervisor, Agent
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
 import json
 
 
@@ -1060,6 +1061,8 @@ class ManagerPendingPoliciesView(APIView):
                     "CreatedAt": _created_for(cp),
                     "policy_name": _policy_name_for(cp),
                     "planID": _normalize_plan_id(_get_field(cp, 'planID', 'PlanID')),
+                    # Include assignment info so Manager Overview can group by agent
+                    "assignedAgentID": _get_field(cp, 'assignedAgentID', 'AssignedAgentID'),
                 }
                 for cp in plans
             ]
@@ -1232,14 +1235,19 @@ class ManagerAssignPolicyView(APIView):
             if not cp:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            # Update CustomerPlan with assignedAgentID only
+            # Use a raw MongoDB update to set assignedAgentID (matches Temp version behavior)
             try:
-                setattr(cp, 'assignedAgentID', agent_user_id)
-                cp.save()
+                print(f"DEBUG: Attempting raw update for Policy {policy_id} -> Agent {agent_user_id}")
+                CustomerPlan.objects(id=cp.id).update(__raw__={
+                    "$set": {
+                        "assignedAgentID": agent_user_id
+                    }
+                })
+                print("DEBUG: Raw update command sent.")
             except Exception as e:
                 return Response({"error": f"Failed to update policy assignment: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            return Response({"ok": True, "assignedAgentID": agent_user_id}, status=status.HTTP_200_OK)
+            return Response({"ok": True,  "assignedAgentID": agent_user_id}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1274,16 +1282,76 @@ class ManagerPolicyDecisionView(APIView):
             return Response({"error": "Invalid decision"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # First try: treat id as a classic PolicyID
+            # Primary: handle CustomerPlan approvals first (per Temp version)
+            cplan = CustomerPlan.objects(CustomerPlanID=int(policy_id)).first()
+            if cplan:
+                # Read status flexibly
+                def _get(cp, *names, default=None):
+                    for n in names:
+                        v = getattr(cp, n, None)
+                        if v is not None:
+                            return v
+                        try:
+                            data = getattr(cp, "_data", None) or {}
+                            if n in data and data[n] is not None:
+                                return data[n]
+                        except Exception:
+                            pass
+                    return default
+
+                raw_status = _get(cplan, 'Status', 'status', default='pending')
+                try:
+                    current_status = str(raw_status if raw_status is not None else 'pending').strip().lower()
+                except Exception:
+                    current_status = 'pending'
+                if current_status != "pending":
+                    return Response({"error": "CustomerPlan is not pending"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Temp uses "denied" for reject branch
+                new_status = "approved" if decision == "approve" else "denied"
+                try:
+                    # Raw update to avoid field constraints
+                    CustomerPlan._get_collection().update_one(
+                        {"_id": cplan.id},
+                        {"$set": {"Status": new_status, "UpdatedAt": _now_utc()}},
+                    )
+                except Exception as ue:
+                    return Response({"error": f"Failed to update CustomerPlan: {ue}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                # Audit log (non-fatal if fails)
+                try:
+                    AuditLog(
+                        LogID=_new_log_id(),
+                        ActorUserID=user.userid,
+                        Action=f"customerplan_{decision}",
+                        TargetType="customerplan",
+                        TargetID=str(cplan.CustomerPlanID),
+                        Details=None,
+                        CreatedAt=_now_utc(),
+                    ).save()
+                except Exception as _log_err:
+                    print(f"[warn] AuditLog save failed (customerplan decision): {_log_err}")
+
+                return Response({"ok": True, "newStatus": new_status}, status=status.HTTP_200_OK)
+
+            # Fallback: legacy Policy object path
             policy = Policy.objects(PolicyID=int(policy_id)).first()
-            if policy:
-                if policy.Status != "pending":
-                    return Response({"error": "Policy is not pending"}, status=status.HTTP_400_BAD_REQUEST)
+            if not policy:
+                return Response({"error": "Policy/CustomerPlan not found"}, status=status.HTTP_404_NOT_FOUND)
 
-                policy.Status = "approved" if decision == "approve" else "rejected"
-                policy.UpdatedAt = _now_utc()
-                policy.save()
+            if getattr(policy, 'Status', 'pending') != "pending":
+                return Response({"error": "Policy is not pending"}, status=status.HTTP_400_BAD_REQUEST)
 
+            new_status = "approved" if decision == "approve" else "denied"
+            try:
+                Policy._get_collection().update_one(
+                    {"_id": policy.id},
+                    {"$set": {"Status": new_status, "UpdatedAt": _now_utc()}},
+                )
+            except Exception as ue:
+                return Response({"error": f"Failed to update Policy: {ue}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            try:
                 AuditLog(
                     LogID=_new_log_id(),
                     ActorUserID=user.userid,
@@ -1293,47 +1361,10 @@ class ManagerPolicyDecisionView(APIView):
                     Details=None,
                     CreatedAt=_now_utc(),
                 ).save()
+            except Exception as _log_err:
+                print(f"[warn] AuditLog save failed (policy decision): {_log_err}")
 
-                return Response({"ok": True, "newStatus": policy.Status}, status=status.HTTP_200_OK)
-
-            # Otherwise, this is a CustomerPlan approval (CustomerPlanID mapped to PolicyID in UI)
-            cplan = CustomerPlan.objects(CustomerPlanID=int(policy_id)).first()
-            if not cplan:
-                return Response({"error": "Policy/CustomerPlan not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            # Read status flexibly (supports missing field -> treat as pending as in list endpoint)
-            def _get(cp, *names, default=None):
-                for n in names:
-                    v = getattr(cp, n, None)
-                    if v is not None:
-                        return v
-                    try:
-                        data = getattr(cp, "_data", None) or {}
-                        if n in data and data[n] is not None:
-                            return data[n]
-                    except Exception:
-                        pass
-                return default
-
-            current_status = (_get(cplan, 'Status', 'status', default='pending') or 'pending').lower()
-            if current_status != "pending":
-                return Response({"error": "CustomerPlan is not pending"}, status=status.HTTP_400_BAD_REQUEST)
-
-            cplan.Status = "approved" if decision == "approve" else "rejected"
-            setattr(cplan, 'UpdatedAt', _now_utc())
-            cplan.save()
-
-            AuditLog(
-                LogID=_new_log_id(),
-                ActorUserID=user.userid,
-                Action=f"customerplan_{decision}",
-                TargetType="customerplan",
-                TargetID=str(cplan.CustomerPlanID),
-                Details=None,
-                CreatedAt=_now_utc(),
-            ).save()
-
-            return Response({"ok": True, "newStatus": cplan.Status}, status=status.HTTP_200_OK)
+            return Response({"ok": True, "newStatus": new_status}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
