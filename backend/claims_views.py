@@ -2,9 +2,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
+from django.utils import timezone
 
 from users.models import User, Claim, Item, Policy, AuditLog, Customer, CustomerPlan, InsurancePlan, Supervisor, Agent
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 
@@ -337,7 +338,7 @@ class AgentCreatePlanView(APIView):
         start_dt = timezone.now()
         end_dt = start_dt + timedelta(days=365)
 
-        try:    
+        try:
             plan = CustomerPlan(
                 CustomerPlanID=next_cpid,
                 CustomerID=customer_id,
@@ -346,6 +347,7 @@ class AgentCreatePlanView(APIView):
                 CurrentPremium=base_price,
                 Status=status_val,
                 planID=plan_id_val,
+                assignedAgentID=None,
             )
             # Optional extras (strict=False allows these)
             if plan_name:
@@ -374,6 +376,7 @@ class AgentCreatePlanView(APIView):
                 "PlanName": plan_name or None,
                 "Description": desc or None,
                 "CoverageLim": coverage_val,
+                "assignedAgentID": None,
             },
             status=status.HTTP_201_CREATED,
         )
