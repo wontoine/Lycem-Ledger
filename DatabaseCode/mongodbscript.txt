@@ -1,8 +1,13 @@
 ssh group3f25@turing.cs.olemiss.edu
+Mdrl2crb@tp!
+
 
 mongosh "mongodb://127.0.0.1:27017" --username group3f25 --authenticationDatabase group3f25_db
-
+2ku4#89LFQ!d
 use group3f25_db
+
+db.customerPlans.find().forEach(printjson);
+
 
 // --- Clear Existing Data (Optional) ---
 // Run these commands if you want to start fresh each time.
@@ -110,7 +115,7 @@ db.customerPlans.insertMany([
     StartDate: new Date("2024-01-01T00:00:00Z"), 
     EndDate: new Date("2025-01-01T00:00:00Z"), 
     CurrentPremium: 500, 
-    Status: "Active", 
+    Status: "pending", 
     planID: 1 // Basic Home
   },
   { 
@@ -247,6 +252,7 @@ print("--- Claims ---");
 db.claimedItems.find().forEach(printjson);
 print("--- Claim History ---");
 db.claimWorkflowHistory.find().forEach(printjson);
+db.customerPlan.find().forEach(printjson);
 
 
 

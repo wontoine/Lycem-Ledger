@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Reset basic margins/padding */
+* {
+  box-sizing: border-box;
+}
+
+/* FIX: Ensure HTML, BODY, and the #root element occupy the full viewport space */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
