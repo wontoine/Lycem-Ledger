@@ -95,6 +95,15 @@ class CustomerPlan(Document):
     """
     CustomerPlanID = IntField(required=True, unique=True, db_field="CustomerPlanID")
     CustomerID = IntField(required=True, db_field="CustomerID")
+    # Optional fields to align with existing documents
+    StartDate = DateTimeField(required=False, db_field="StartDate")
+    EndDate = DateTimeField(required=False, db_field="EndDate")
+    CurrentPremium = FloatField(required=False, db_field="CurrentPremium")
+    Status = StringField(required=False, db_field="Status")
+    planID = IntField(required=False, db_field="planID")
+    PlanName = StringField(required=False, db_field="PlanName")
+    coverageLim = FloatField(required=False, db_field="coverageLim")
+    Description = StringField(required=False, db_field="Description")
 
     meta = {
         'collection': 'customerPlans',
@@ -530,7 +539,7 @@ class ClaimRecord(Document):
     Only core fields declared; strict=False allows extra fields to live in the document.
     """
     ClaimID = IntField(required=True, unique=True, db_field="ClaimID")
-    ItemID = IntField(required=True, db_field="ItemID")
+    ItemID = IntField(required=False, null=True, db_field="ItemID")
     CurrentStatusID = IntField(required=True, db_field="CurrentStatusID")
     LossDate = DateTimeField(required=False, db_field="LossDate")
     ClaimedValueAtTime = StringField(required=False, db_field="ClaimedValueAtTime")

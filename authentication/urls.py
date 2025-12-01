@@ -8,6 +8,7 @@ from .views import (
     SubmitClaimView,
     AddItemWithImagesView,
     PolicyDetailView,
+    CreateCustomerPlanView,
 )
 
 
@@ -20,5 +21,6 @@ urlpatterns = [
     path("claims/submit/", SubmitClaimView.as_view(), name="submit-claim"),
     path("items/add/", AddItemWithImagesView.as_view(), name="add-item-with-images"),
     path("policies/<int:customerPlanID>/", PolicyDetailView.as_view(), name="policy-detail"),
+    path("customer/plans/create/", CreateCustomerPlanView.as_view(), name="customer-plan-create"),
 ]
 

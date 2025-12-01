@@ -16,6 +16,7 @@ from users.models import User, Role, Customer, CustomerPlan, InsurancePlan, Item
 from django.utils import timezone
 from decimal import Decimal
 from datetime import datetime
+from datetime import timedelta
 from .serializers import (
     LoginSerializer,
     CreateAccountSerializer,
@@ -1160,6 +1161,92 @@ class PolicyDetailView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
+class CreateCustomerPlanView(APIView):
+    """
+    Create a new customer plan in customerPlans with:
+    - planID fixed to 4
+    - Status fixed to "Active"
+    - CurrentPremium taken from basePrice in the request
+    - StartDate = now (UTC), EndDate = StartDate + 365 days
+    - CustomerPlanID = max+1
+    Optional passthrough fields (stored because strict=False): PlanName, coverageLim, Description.
+    """
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+
+        # Required: CustomerID and basePrice (maps to CurrentPremium)
+        try:
+            customer_id = int(data.get("CustomerID"))
+        except Exception:
+            return Response({"error": {"CustomerID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            current_premium = float(data.get("basePrice"))
+        except Exception:
+            return Response({"error": {"basePrice": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan_name = data.get("PlanName")
+        coverage_lim = data.get("coverageLim")
+        description = data.get("Description")
+
+        # Resolve next CustomerPlanID
+        try:
+            last = CustomerPlan.objects.order_by("-CustomerPlanID").first()
+            last_id = None
+            if last:
+                last_id = getattr(last, "CustomerPlanID", None)
+                if last_id is None and hasattr(last, "_data"):
+                    last_id = last._data.get("CustomerPlanID") or last._data.get("customerPlanID")
+            next_id = (int(last_id) + 1) if last_id is not None else 1
+        except Exception:
+            next_id = 1
+
+        start_dt = timezone.now()
+        end_dt = start_dt + timedelta(days=365)
+
+        try:
+            plan_doc = CustomerPlan(
+                CustomerPlanID=next_id,
+                CustomerID=customer_id,
+                StartDate=start_dt,
+                EndDate=end_dt,
+                CurrentPremium=current_premium,
+                Status="Active",
+                planID=4,
+            )
+            # Store optional fields if provided (strict=False allows this)
+            if plan_name:
+                setattr(plan_doc, "PlanName", plan_name)
+            if coverage_lim not in (None, ""):
+                try:
+                    setattr(plan_doc, "coverageLim", float(coverage_lim))
+                except Exception:
+                    pass
+            if description:
+                setattr(plan_doc, "Description", description)
+
+            plan_doc.save()
+        except Exception as e:
+            msg = "Unable to create customer plan"
+            if settings.DEBUG:
+                msg = f"Create failed: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(
+            {
+                "created": True,
+                "customerPlanID": next_id,
+                "customerID": customer_id,
+                "planID": 4,
+                "status": "Active",
+                "currentPremium": current_premium,
+                "startDate": start_dt.isoformat(),
+                "endDate": end_dt.isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class ResetPasswordView(APIView):
     """
