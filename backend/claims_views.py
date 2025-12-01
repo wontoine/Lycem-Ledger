@@ -2,9 +2,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
+from django.utils import timezone
 
 from users.models import User, Claim, Item, Policy, AuditLog, Customer, CustomerPlan, InsurancePlan, Supervisor, Agent
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 
@@ -273,13 +274,21 @@ class AgentClaimsDashboard(APIView):
 class AgentCreatePlanView(APIView):
     """
     Agent creates a new customer plan entry in customerPlans.
+    Input payload (from frontend):
+      {
+        userID,           # here this is the customerID
+        planID,           # plan id from selected plan
+        PlanName,
+        Description,
+        CoverageLim,
+        BasePrice,
+        status            # e.g., "approved" (we store in Status)
+      }
+    Logic:
     - customerPlanID auto-assigned as max+1
-    - planID fixed to 4
-    - Status fixed to "Active"
-    - CurrentPremium taken from BasePrice
     - StartDate = now (UTC), EndDate = StartDate + 365 days
-    - Requires CustomerID in payload
-    Optional fields: PlanName, CoverageLim, Description.
+    - Status taken from payload (fallback "Active")
+    - CurrentPremium taken from BasePrice
     """
 
     def post(self, request):
@@ -292,24 +301,27 @@ class AgentCreatePlanView(APIView):
         data = request.data if isinstance(request.data, dict) else {}
 
         # Required fields
-        plan_name = str(data.get("PlanName") or "").strip()
-        if not plan_name:
-            return Response({"error": {"PlanName": "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            customer_id = int(data.get("CustomerID"))
+            customer_id = int(data.get("userID"))
         except Exception:
-            return Response({"error": {"CustomerID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": {"userID": "Must be an integer (customerID)"}}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            plan_id_val = int(data.get("planID"))
+        except Exception:
+            return Response({"error": {"planID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
         try:
             base_price = float(data.get("BasePrice"))
         except Exception:
             return Response({"error": {"BasePrice": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
 
+        plan_name = str(data.get("PlanName") or "").strip()
         desc = str(data.get("Description")).strip() if data.get("Description") else None
         coverage = data.get("CoverageLim")
         try:
             coverage_val = float(coverage) if coverage not in (None, "") else None
         except Exception:
             return Response({"error": {"CoverageLim": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+        status_val = str(data.get("status") or "").strip() or "Active"
 
         # Generate next CustomerPlanID
         try:
@@ -333,11 +345,12 @@ class AgentCreatePlanView(APIView):
                 StartDate=start_dt,
                 EndDate=end_dt,
                 CurrentPremium=base_price,
-                Status="Active",
-                planID=4,
+                Status=status_val,
+                planID=plan_id_val,
             )
             # Optional extras (strict=False allows these)
-            plan.PlanName = plan_name
+            if plan_name:
+                plan.PlanName = plan_name
             if desc:
                 plan.Description = desc
             if coverage_val is not None:
@@ -354,13 +367,13 @@ class AgentCreatePlanView(APIView):
                 "created": True,
                 "customerPlanID": next_cpid,
                 "CustomerID": customer_id,
-                "planID": 4,
-                "Status": "Active",
+                "planID": plan_id_val,
+                "Status": status_val,
                 "CurrentPremium": base_price,
                 "StartDate": start_dt.isoformat(),
                 "EndDate": end_dt.isoformat(),
-                "PlanName": plan_name,
-                "Description": desc,
+                "PlanName": plan_name or None,
+                "Description": desc or None,
                 "CoverageLim": coverage_val,
             },
             status=status.HTTP_201_CREATED,
