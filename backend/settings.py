@@ -62,7 +62,7 @@ CSRF_TRUSTED_ORIGINS = [
 # Allow custom headers used by the frontend (e.g., x-user-id) in CORS preflight
 # This fixes: "Request header field x-user-id is not allowed by Access-Control-Allow-Headers"
 CORS_ALLOW_HEADERS = list(default_headers) + [
-    "x-user-id",
+    "x-user-id", "userID", "UserID", 
 ]
 
 

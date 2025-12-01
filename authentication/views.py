@@ -885,8 +885,8 @@ class AddItemWithImagesView(APIView):
     def post(self, request):
         data = request.data if isinstance(request.data, dict) else {}
 
-        # Required fields
-        for field in ["name", "estimatedValue", "customerPlanID", "customerID"]:
+        # Required fields (note: userID drives ownership; we resolve customerID from it)
+        for field in ["name", "estimatedValue", "customerPlanID", "userID"]:
             if field not in data or data[field] in (None, ""):
                 return Response({"error": {field: "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -898,9 +898,9 @@ class AddItemWithImagesView(APIView):
         except Exception:
             return Response({"error": {"customerPlanID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            customer_id = int(data.get("customerID"))
+            user_id = int(data.get("userID"))
         except Exception:
-            return Response({"error": {"customerID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": {"userID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             estimated_value = Decimal(str(data.get("estimatedValue")))
@@ -917,13 +917,49 @@ class AddItemWithImagesView(APIView):
                 return Response({"error": {"purchaseDate": "Invalid date format"}}, status=status.HTTP_400_BAD_REQUEST)
         purchase_date_str = purchase_date.isoformat() if purchase_date else None
 
-        # Validate policy exists (by plan_id) and matches the provided customerID
+        # Resolve customer by userID
+        try:
+            customer = Customer.objects(UserID=user_id).first()
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if not customer:
+            return Response({"error": "Customer not found for this userID"}, status=status.HTTP_404_NOT_FOUND)
+
+        customer_id = getattr(customer, "CustomerID", None)
+        try:
+            customer_id = int(customer_id) if customer_id is not None else None
+        except Exception:
+            customer_id = None
+
+        if customer_id is None:
+            return Response({"error": "Customer record missing CustomerID"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate policy exists (by plan_id) and matches this customer's CustomerID
+        def _get_customer_id(doc):
+            """
+            Resolve CustomerID from the document. Do NOT fall back to userID.
+            """
+            for k in ("CustomerID", "customerID"):
+                v = getattr(doc, k, None)
+                if v is None and hasattr(doc, "_data"):
+                    v = doc._data.get(k)
+                if v is not None:
+                    return v
+            return None
+
         try:
             policy = CustomerPlan.objects(__raw__={
                 "$or": [
                     {"CustomerPlanID": plan_id},
                     {"customerPlanID": plan_id},
                     {"planID": plan_id},
+                    {"CustomerPlanID": str(plan_id)},
+                    {"customerPlanID": str(plan_id)},
+                    {"planID": str(plan_id)},
                 ]
             }).first()
         except Exception as e:
@@ -934,7 +970,14 @@ class AddItemWithImagesView(APIView):
 
         if not policy:
             return Response({"error": "customerPlanID not found"}, status=status.HTTP_404_NOT_FOUND)
-        if getattr(policy, "CustomerID", None) != customer_id:
+
+        owner = _get_customer_id(policy)
+        try:
+            owner_int = int(owner) if owner is not None else None
+        except Exception:
+            owner_int = None
+
+        if owner_int is None or owner_int != customer_id:
             return Response({"error": "customerID does not match plan ownership"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Generate next ItemID (max+1)
