@@ -647,7 +647,7 @@ class SubmitClaimView(APIView):
 
     def post(self, request):
         data = request.data if isinstance(request.data, dict) else {}
-        required = ["userID", "policyID", "itemID", "amount", "reason"]
+        required = ["userID", "policyID", "amount", "reason"]
         missing = [f for f in required if f not in data or data[f] in (None, "")]
         if missing:
             return Response({"error": {"missing": missing}}, status=status.HTTP_400_BAD_REQUEST)
@@ -655,9 +655,17 @@ class SubmitClaimView(APIView):
         try:
             user_id = int(data.get("userID"))
             policy_id = int(data.get("policyID"))
-            item_id = int(data.get("itemID"))
         except (ValueError, TypeError):
-            return Response({"error": "userID, policyID, and itemID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "userID and policyID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+        item_id = data.get("itemID")
+        if item_id not in (None, ""):
+            try:
+                item_id = int(item_id)
+            except (ValueError, TypeError):
+                return Response({"error": "itemID must be an integer if provided"}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            item_id = None
 
         try:
             amount = Decimal(str(data.get("amount")))
@@ -701,31 +709,33 @@ class SubmitClaimView(APIView):
         if not policy:
             return Response({"error": "Policy not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate item belongs to this customer
-        try:
-            item = Item.objects(ItemID=item_id, CustomerID=customer.CustomerID).first()
+        item = None
+        if item_id is not None:
+            # Validate item belongs to this customer
+            try:
+                item = Item.objects(ItemID=item_id, CustomerID=customer.CustomerID).first()
+                if not item:
+                    item = Item.objects(__raw__={"ItemID": item_id, "CustomerID": customer.CustomerID}).first()
+            except Exception as e:
+                msg = "Database connection error"
+                if settings.DEBUG:
+                    msg = f"Database error: {e}"
+                return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
             if not item:
-                item = Item.objects(__raw__={"ItemID": item_id, "CustomerID": customer.CustomerID}).first()
-        except Exception as e:
-            msg = "Database connection error"
-            if settings.DEBUG:
-                msg = f"Database error: {e}"
-            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not item:
-            return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
+            # Prevent duplicate open claims on the same item (status Filed=1, In Review=2)
+            try:
+                open_claim = ClaimRecord.objects(__raw__={
+                    "ItemID": item_id,
+                    "CurrentStatusID": {"$in": [1, 2]}
+                }).first()
+            except Exception:
+                open_claim = None
 
-        # Prevent duplicate open claims on the same item (status Filed=1, In Review=2)
-        try:
-            open_claim = ClaimRecord.objects(__raw__={
-                "ItemID": item_id,
-                "CurrentStatusID": {"$in": [1, 2]}
-            }).first()
-        except Exception:
-            open_claim = None
-
-        if open_claim:
-            return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
+            if open_claim:
+                return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
 
         # Generate next ClaimID (simple max+1)
         try:
@@ -762,12 +772,13 @@ class SubmitClaimView(APIView):
             return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Mark item as in-progress (add a field without strict schema enforcement)
-        try:
-            setattr(item, "ClaimStatus", "In Progress")
-            item.save()
-        except Exception:
-            # best effort; do not fail claim creation if item update fails
-            pass
+        if item is not None:
+            try:
+                setattr(item, "ClaimStatus", "In Progress")
+                item.save()
+            except Exception:
+                # best effort; do not fail claim creation if item update fails
+                pass
 
         # Log workflow history (Filed) with agent/employee name resolved from assignment
         try:

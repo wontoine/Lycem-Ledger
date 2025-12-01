@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.conf import settings
 
 from users.models import User, Claim, Item, Policy, AuditLog, Customer, CustomerPlan, InsurancePlan, Supervisor, Agent
 from datetime import datetime
@@ -268,6 +269,87 @@ class AgentClaimsDashboard(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+class AgentCreatePlanView(APIView):
+    """
+    Agent creates a new insurance plan entry in insurancePlans.
+    - planID auto-assigned as max+1
+    - PlanName must be unique (case-insensitive)
+    - Optional fields: Description, CoverageLim, BasePrice
+    """
+
+    def post(self, request):
+        user, err = _require_user(request)
+        if err:
+            return err
+        if not (_is_agent(user) or _is_manager(user) or _is_admin(user)):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data if isinstance(request.data, dict) else {}
+        plan_name = str(data.get("PlanName") or "").strip()
+        if not plan_name:
+            return Response({"error": {"PlanName": "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure PlanName uniqueness (case-insensitive)
+        try:
+            existing = InsurancePlan.objects(__raw__={
+                "PlanName": {"$regex": f"^{plan_name}$", "$options": "i"}
+            }).first()
+            if existing:
+                return Response({"error": "PlanName already exists"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            msg = "Database connection error"
+            if settings.DEBUG:
+                msg = f"Database error: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Generate next planID
+        try:
+            last = InsurancePlan.objects.order_by("-planID").first()
+            last_id = getattr(last, "planID", None) or getattr(last, "PlanID", None)
+            next_id = (last_id + 1) if last_id is not None else 1
+        except Exception:
+            next_id = 1
+
+        # Optional fields
+        desc = str(data.get("Description")).strip() if data.get("Description") else None
+        coverage = data.get("CoverageLim")
+        base_price = data.get("BasePrice")
+        try:
+            coverage_val = float(coverage) if coverage not in (None, "") else None
+        except Exception:
+            return Response({"error": {"CoverageLim": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            base_price_val = float(base_price) if base_price not in (None, "") else None
+        except Exception:
+            return Response({"error": {"BasePrice": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            plan = InsurancePlan(planID=next_id, PlanName=plan_name)
+            if desc:
+                plan.Description = desc
+            if coverage_val is not None:
+                plan.CoverageLim = coverage_val
+            if base_price_val is not None:
+                plan.BasePrice = base_price_val
+            plan.save()
+        except Exception as e:
+            msg = "Unable to create plan"
+            if settings.DEBUG:
+                msg = f"Create failed: {e}"
+            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(
+            {
+                "created": True,
+                "planID": next_id,
+                "PlanName": plan_name,
+                "Description": desc,
+                "CoverageLim": coverage_val,
+                "BasePrice": base_price_val,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class ClaimDetailView(APIView):
     """

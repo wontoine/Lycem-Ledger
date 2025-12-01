@@ -115,7 +115,10 @@ class InsurancePlan(Document):
     { "planID": 1, "PlanName": "Basic Home", "Description": "...", "BasePrice": 500 }
     """
     planID = IntField(required=True, unique=True, db_field="planID")
-    PlanName = StringField(required=False, max_length=255)
+    PlanName = StringField(required=False, max_length=255, db_field="PlanName")
+    Description = StringField(required=False, db_field="Description")
+    CoverageLim = FloatField(required=False, db_field="CoverageLim")
+    BasePrice = FloatField(required=False, db_field="BasePrice")
 
     meta = {
         'collection': 'insurancePlans',

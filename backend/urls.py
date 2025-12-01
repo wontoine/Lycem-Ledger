@@ -38,6 +38,7 @@ from .claims_views import (
     ItemDetailView,
     PolicyListCreateView,
     PolicyDetailView,
+    AgentCreatePlanView,
 )
 
 urlpatterns = [
@@ -63,6 +64,7 @@ urlpatterns = [
     # Policies CRUD + manager approval endpoints
     path("api/policies/", PolicyListCreateView.as_view(), name="policies-list-create"),
     path("api/manager/policies/<int:etc>/", PolicyDetailView.as_view(), name="policy-detail"),
+    path("api/agent/createPlan/", AgentCreatePlanView.as_view(), name="agent-create-plan"),
     path("api/manager/employees/", ManagerEmployeesView.as_view(), name="manager-employees"),
     path("api/manager/customers/unassigned/", ManagerUnassignedCustomersView.as_view(), name="manager-unassigned-customers"),
     path("api/manager/policies/", ManagerPoliciesView.as_view(), name="manager-policies"),
