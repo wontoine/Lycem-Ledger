@@ -514,7 +514,10 @@ class Claim(Document):
     """
     ClaimID = IntField(required=True, unique=True)
     CustomerID = IntField(required=True)
+    # New linkage: claims are associated with customerPlans, not policies.
+    # Keep PolicyID for backward compatibility but prefer CustomerPlanID going forward.
     PolicyID = IntField(required=False, null=True)
+    CustomerPlanID = IntField(required=False, null=True)
     AssignedToUserID = IntField(required=False, null=True)
     Status = StringField(required=True, choices=(
         'submitted', 'in_review', 'accepted', 'rejected'
@@ -530,6 +533,7 @@ class Claim(Document):
         'indexes': [
             {'fields': ['ClaimID'], 'unique': True},
             {'fields': ['CustomerID']},
+            {'fields': ['CustomerPlanID'], 'sparse': True},
             {'fields': ['AssignedToUserID'], 'sparse': True},
             {'fields': ['Status']},
         ],

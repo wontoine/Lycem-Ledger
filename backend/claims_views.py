@@ -57,12 +57,12 @@ def _current_user(request):
 
         # DRF Headers is case-insensitive, but we also probe common variants + META
         uid = (
-            headers.get("userid")
-            or headers.get("UserID")
-            or headers.get("x-user-id")
-            or headers.get("X-User-ID")
-            or meta.get("HTTP_USERID")
-            or meta.get("HTTP_X_USER_ID")
+                headers.get("userid")
+                or headers.get("UserID")
+                or headers.get("x-user-id")
+                or headers.get("X-User-ID")
+                or meta.get("HTTP_USERID")
+                or meta.get("HTTP_X_USER_ID")
         )
 
         # As a last resort (dev convenience only), allow query param
@@ -250,23 +250,280 @@ class AgentClaimsDashboard(APIView):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Grab all claims where AssignedToUserID matches the current user
-            claims = Claim.objects(AssignedToUserID=user.userid)
+            # Determine the AgentID for this logged-in user
+            agent_id = None
+            try:
+                agent_doc = Agent.objects(UserID=user.userid).first()
+                if agent_doc and getattr(agent_doc, "AgentID", None):
+                    agent_id = int(getattr(agent_doc, "AgentID"))
+            except Exception:
+                pass
+
+            # --- CORRECTION START ---
+            # Build query to find plans assigned to either the AgentID OR the UserID
+            query_filter = [
+                {"assignedAgentID": user.userid},
+                {"AssignedAgentID": user.userid},
+                {"assignedAgentID": str(user.userid)},
+                {"AssignedAgentID": str(user.userid)},
+            ]
+
+            if agent_id:
+                query_filter.extend([
+                    {"assignedAgentID": agent_id},
+                    {"AssignedAgentID": agent_id},
+                    {"assignedAgentID": str(agent_id)},
+                    {"AssignedAgentID": str(agent_id)},
+                ])
+
+            try:
+                assigned_plans = CustomerPlan.objects(__raw__={"$or": query_filter})
+            except Exception:
+                assigned_plans = []
+            # --- CORRECTION END ---
+
+            # Prefer linking via CustomerPlanID instead of CustomerID
+            plan_ids = set()
+            customer_ids = set()
+            for cp in assigned_plans:
+                try:
+                    pid = getattr(cp, "CustomerPlanID", None) or getattr(getattr(cp, "_data", {}), "get",
+                                                                         lambda *_: None)("CustomerPlanID")
+                except Exception:
+                    pid = None
+                if pid is not None:
+                    try:
+                        plan_ids.add(int(pid))
+                    except Exception:
+                        pass
+                # Also collect customer IDs to support legacy claims without CustomerPlanID
+                try:
+                    cid = getattr(cp, "CustomerID", None) or (
+                        cp._data.get("CustomerID") if hasattr(cp, "_data") else None)
+                except Exception:
+                    cid = None
+                if cid is not None:
+                    try:
+                        customer_ids.add(int(cid))
+                    except Exception:
+                        pass
+
+            # Build primary query: claims linked to these customer plan IDs (support int and string storage)
+            claims = []
+            debug = str(getattr(getattr(request, "GET", None), "get", lambda *_: "0")("debug") or "0").lower() in ("1",
+                                                                                                                   "true",
+                                                                                                                   "yes")
+            tried_primary = False
+            tried_fallback_customer = False
+            tried_fallback_assigned = False
+
+            if plan_ids:
+                tried_primary = True
+                try:
+                    plan_id_list = list(plan_ids)
+                    plan_id_str_list = [str(p) for p in plan_id_list]
+                    claims = Claim.objects(__raw__={
+                        "$or": [
+                            {"CustomerPlanID": {"$in": plan_id_list}},
+                            {"CustomerPlanID": {"$in": plan_id_str_list}},
+                        ]
+                    })
+                except Exception:
+                    claims = []
+
+            # Fallback 1: legacy claims linked only by CustomerID (no CustomerPlanID on claim)
+            if (not claims) and customer_ids:
+                tried_fallback_customer = True
+                try:
+                    cid_list = list(customer_ids)
+                    cid_str_list = [str(c) for c in cid_list]
+                    claims = Claim.objects(__raw__={
+                        "$and": [
+                            {"CustomerID": {"$in": cid_list + cid_str_list}},
+                            {"$or": [
+                                {"CustomerPlanID": {"$exists": False}},
+                                {"CustomerPlanID": None},
+                                {"CustomerPlanID": ""}
+                            ]}
+                        ]
+                    })
+                except Exception:
+                    claims = []
+
+            # Fallback 2: as a last resort, include claims explicitly assigned to the agent user
+            if not claims:
+                tried_fallback_assigned = True
+                try:
+                    claims = Claim.objects(AssignedToUserID=user.userid)
+                except Exception:
+                    claims = []
+
             data = [
                 {
                     "ClaimID": c.ClaimID,
                     "CustomerID": c.CustomerID,
                     "PolicyID": c.PolicyID,
+                    "CustomerPlanID": getattr(c, "CustomerPlanID", None),
                     "Status": c.Status,
                     "Amount": c.Amount,
                     "Reason": c.Reason,
-                    "ItemIDs": list(c.ItemIDs or []),
-                    "CreatedAt": c.CreatedAt,
-                    "UpdatedAt": c.UpdatedAt,
+                    "ItemIDs": list(getattr(c, "ItemIDs", []) or []),
+                    "CreatedAt": getattr(c, "CreatedAt", None),
+                    "UpdatedAt": getattr(c, "UpdatedAt", None),
                 }
                 for c in claims
             ]
+
+            if debug:
+                meta = {
+                    "agentUserID": user.userid,
+                    "agentID": agent_id,
+                    "planCount": len(plan_ids),
+                    "customerCount": len(customer_ids),
+                    "usedPrimary": tried_primary,
+                    "usedFallbackCustomer": tried_fallback_customer,
+                    "usedFallbackAssigned": tried_fallback_assigned,
+                    "resultCount": len(data),
+                }
+                return Response({"claims": data, "debug": meta}, status=status.HTTP_200_OK)
+
             return Response({"claims": data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AgentPoliciesView(APIView):
+    """
+    Returns policies (customer plans) for the logged-in agent.
+
+    The frontend expects an array under the key 'policies'. Each entry should
+    include fields similar to a policy card shown in the Agent Home Page.
+    """
+
+    def get(self, request):
+        user, err = _require_user(request)
+        if err:
+            return err
+        if not _is_agent(user):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Determine AgentID for this user (if it exists)
+            agent_id = None
+            try:
+                agent_doc = Agent.objects(UserID=user.userid).first()
+                if agent_doc and getattr(agent_doc, "AgentID", None):
+                    agent_id = int(getattr(agent_doc, "AgentID"))
+            except Exception:
+                pass
+
+            # --- CORRECTION START ---
+            # Search for plans assigned to either UserID OR AgentID
+            query_filter = [
+                {"assignedAgentID": user.userid},
+                {"AssignedAgentID": user.userid},
+                {"assignedAgentID": str(user.userid)},
+                {"AssignedAgentID": str(user.userid)},
+            ]
+
+            if agent_id:
+                query_filter.extend([
+                    {"assignedAgentID": agent_id},
+                    {"AssignedAgentID": agent_id},
+                    {"assignedAgentID": str(agent_id)},
+                    {"AssignedAgentID": str(agent_id)},
+                ])
+
+            try:
+                assigned_plans = CustomerPlan.objects(__raw__={"$or": query_filter})
+            except Exception:
+                assigned_plans = []
+
+            # --- CORRECTION END ---
+
+            def _get(cp, *names, default=None):
+                for n in names:
+                    try:
+                        if hasattr(cp, n):
+                            val = getattr(cp, n)
+                            if val is not None:
+                                return val
+                        # Fallback to raw data if available
+                        if hasattr(cp, "_data") and n in cp._data and cp._data[n] is not None:
+                            return cp._data[n]
+                    except Exception:
+                        continue
+                return default
+
+            # Build a lookup of planID -> InsurancePlan to enrich any missing fields
+            plan_ids = set()
+            for cp in assigned_plans:
+                pid = _get(cp, "planID", "PlanID")
+                if pid is not None:
+                    try:
+                        plan_ids.add(int(pid))
+                    except Exception:
+                        pass
+
+            plan_lookup = {}
+            if plan_ids:
+                try:
+                    plans = InsurancePlan.objects(planID__in=list(plan_ids))
+                    for p in plans:
+                        try:
+                            plan_lookup[int(getattr(p, "planID", None) or p._data.get("planID"))] = p
+                        except Exception:
+                            continue
+                except Exception:
+                    plan_lookup = {}
+
+            def _plan_val(p, *names):
+                for n in names:
+                    try:
+                        v = getattr(p, n, None)
+                        if v is not None:
+                            return v
+                    except Exception:
+                        pass
+                    try:
+                        d = getattr(p, "_data", {})
+                        if n in d and d[n] is not None:
+                            return d[n]
+                    except Exception:
+                        pass
+                return None
+
+            policies = []
+            for cp in assigned_plans:
+                cp_plan_id = _get(cp, "planID", "PlanID")
+                ip = None
+                try:
+                    if cp_plan_id is not None:
+                        ip = plan_lookup.get(int(cp_plan_id))
+                except Exception:
+                    ip = None
+
+                policy = {
+                    "PolicyID": _get(cp, "CustomerPlanID", "customerPlanID", "customerplanID"),
+                    "CustomerID": _get(cp, "CustomerID", "customerID"),
+                    "Status": _get(cp, "Status", default="Active"),
+                    # Prefer values from customerPlans; fallback to insurancePlans
+                    "PlanName": _get(cp, "PlanName", "planName") or (ip and _plan_val(ip, "PlanName")),
+                    "Description": _get(cp, "Description", "description") or (ip and _plan_val(ip, "Description")),
+                    "CoverageLim": _get(cp, "CoverageLim", "coverageLim")
+                    if _get(cp, "CoverageLim", "coverageLim") is not None else (ip and _plan_val(ip, "CoverageLim")),
+                    # BasePrice is the catalog value; CurrentPremium is the customer plan price
+                    "BasePrice": _get(cp, "CurrentPremium", "BasePrice", "basePrice")
+                    if _get(cp, "CurrentPremium", "BasePrice", "basePrice") is not None else (
+                                ip and _plan_val(ip, "BasePrice")),
+                    "StartDate": _get(cp, "StartDate", "startDate"),
+                    "EndDate": _get(cp, "EndDate", "endDate"),
+                    "planID": cp_plan_id,
+                    "assignedAgentID": _get(cp, "assignedAgentID", "AssignedAgentID"),
+                }
+                policies.append(policy)
+
+            return Response({"policies": policies}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -284,11 +541,6 @@ class AgentCreatePlanView(APIView):
         BasePrice,
         status            # e.g., "approved" (we store in Status)
       }
-    Logic:
-    - customerPlanID auto-assigned as max+1
-    - StartDate = now (UTC), EndDate = StartDate + 365 days
-    - Status taken from payload (fallback "Active")
-    - CurrentPremium taken from BasePrice
     """
 
     def post(self, request):
@@ -304,7 +556,8 @@ class AgentCreatePlanView(APIView):
         try:
             customer_id = int(data.get("userID"))
         except Exception:
-            return Response({"error": {"userID": "Must be an integer (customerID)"}}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": {"userID": "Must be an integer (customerID)"}},
+                            status=status.HTTP_400_BAD_REQUEST)
         try:
             plan_id_val = int(data.get("planID"))
         except Exception:
@@ -338,7 +591,16 @@ class AgentCreatePlanView(APIView):
         start_dt = timezone.now()
         end_dt = start_dt + timedelta(days=365)
 
-        try:    
+        # Resolve the logged-in Agent's AgentID (to set assignedAgentID on the plan)
+        agent_id_for_assignment = None
+        try:
+            ag = Agent.objects(UserID=user.userid).first()
+            if ag and getattr(ag, "AgentID", None) is not None:
+                agent_id_for_assignment = int(getattr(ag, "AgentID"))
+        except Exception:
+            agent_id_for_assignment = None
+
+        try:
             plan = CustomerPlan(
                 CustomerPlanID=next_cpid,
                 CustomerID=customer_id,
@@ -355,6 +617,9 @@ class AgentCreatePlanView(APIView):
                 plan.Description = desc
             if coverage_val is not None:
                 plan.coverageLim = coverage_val
+            if agent_id_for_assignment is not None:
+                # Persist assignment by AgentID on the customer plan so agents can later see it
+                setattr(plan, "assignedAgentID", agent_id_for_assignment)
             plan.save()
         except Exception as e:
             msg = "Unable to create customer plan"
@@ -375,33 +640,15 @@ class AgentCreatePlanView(APIView):
                 "PlanName": plan_name or None,
                 "Description": desc or None,
                 "CoverageLim": coverage_val,
+                "assignedAgentID": agent_id_for_assignment,
             },
             status=status.HTTP_201_CREATED,
         )
 
+
 class ClaimDetailView(APIView):
     """
     Main view for looking at one specific claim. Does read, update, and delete.
-
-    GET:
-    - Pulls up the claim info, PLUS the customer's history and their items (so the agent has context).
-    - Input: claim_id in URL.
-    - Output (200):
-      {
-        "claim": { ... details ... },
-        "previousClaims": [ ... old claims ... ],
-        "customerItems": [ ... items owned by customer ... ]
-      }
-
-    PUT:
-    - Updates fields in the claim.
-    - Input: JSON body with fields to change (e.g., {"Status": "reviewing"}).
-    - Output (200): {"ok": true}
-
-    DELETE:
-    - Deletes the claim entirely.
-    - Permission: Admin ONLY.
-    - Output (200): {"ok": true}
     """
 
     def get(self, request, claim_id: int):
@@ -426,6 +673,7 @@ class ClaimDetailView(APIView):
                     "ClaimID": claim.ClaimID,
                     "CustomerID": claim.CustomerID,
                     "PolicyID": claim.PolicyID,
+                    "CustomerPlanID": getattr(claim, "CustomerPlanID", None),
                     "AssignedToUserID": claim.AssignedToUserID,
                     "Status": claim.Status,
                     "Amount": claim.Amount,
@@ -474,6 +722,7 @@ class ClaimDetailView(APIView):
             updatable = {
                 "CustomerID": int,
                 "PolicyID": (lambda v: int(v) if v is not None else None),
+                "CustomerPlanID": (lambda v: int(v) if v is not None else None),
                 "AssignedToUserID": (lambda v: int(v) if v is not None else None),
                 "Status": str,
                 "Reason": (lambda v: v),
@@ -548,11 +797,6 @@ class ClaimDetailView(APIView):
 class ClaimDecisionView(APIView):
     """
     Where the Agent makes the call: Accept or Reject.
-
-    POST:
-    - Input: JSON body {"decision": "accept", "reason": "Looks good"} or {"decision": "reject"}.
-    - Logic: Agents can only decide on THEIR assigned claims. Managers can decide on any.
-    - Output (200): {"ok": true, "newStatus": "accepted"}
     """
 
     def post(self, request, claim_id: int):
@@ -601,12 +845,6 @@ class ClaimDecisionView(APIView):
 class SupervisorClaimsReviewList(APIView):
     """
     List for Managers to review claims that Agents have already 'accepted'.
-
-    GET:
-    - Only for Managers/Admins.
-    - Input: None.
-    - Output (200): List of claims with Status='accepted'.
-      { "claims": [...] }
     """
 
     def get(self, request):
@@ -622,6 +860,7 @@ class SupervisorClaimsReviewList(APIView):
                     "ClaimID": c.ClaimID,
                     "CustomerID": c.CustomerID,
                     "PolicyID": c.PolicyID,
+                    "CustomerPlanID": getattr(c, "CustomerPlanID", None),
                     "AssignedToUserID": c.AssignedToUserID,
                     "Status": c.Status,
                     "Amount": c.Amount,
@@ -640,11 +879,6 @@ class SupervisorClaimsReviewList(APIView):
 class SupervisorClaimDecisionView(APIView):
     """
     Manager's final say on a claim. They can Approve or Deny what the agent accepted.
-
-    POST:
-    - Input: {"decision": "approve"|"deny", "reason": "optional"}.
-    - Constraint: Can only act on claims that are currently 'accepted'.
-    - Output (200): {"ok": true, "newStatus": "approved"}
     """
 
     def post(self, request, claim_id: int):
@@ -693,15 +927,6 @@ class SupervisorClaimDecisionView(APIView):
 class ManagerEmployeesView(APIView):
     """
     Shows a manager their direct reports.
-
-    GET:
-    - Input: None.
-    - Output (200): List of users where managerID matches current user.
-      {
-        "employees": [
-          {"userid": 77, "username": "agent_bob", "role": "agent", ...}
-        ]
-      }
     """
 
     def get(self, request):
@@ -780,17 +1005,6 @@ class ManagerEmployeesView(APIView):
 class ManagerUnassignedCustomersView(APIView):
     """
     Lists customers that do not have an AssignedAgentUserID so a manager can assign them.
-
-    GET /api/manager/customers/unassigned/
-
-    Permissions:
-    - Managers/Admins only.
-
-    Scope:
-    - Admins: all unassigned customers.
-    - Managers: all unassigned customers (global), since assignment determines team.
-      This matches the requirement to surface all customers missing an agent so the
-      supervisor can assign them to someone on their team.
     """
 
     def get(self, request):
@@ -823,15 +1037,7 @@ class ManagerUnassignedCustomersView(APIView):
 
 class ManagerPoliciesView(APIView):
     """
-    Shows a manager all policies they are responsible for (i.e., policies for
-    customers whose claims are currently handled by the manager's direct reports).
-
-    GET:
-    - Input: None.
-    - Output (200): All policies within the manager's scope.
-      { "policies": [...] }
-    Notes:
-    - Admins see all policies.
+    Shows a manager all policies they are responsible for.
     """
 
     def get(self, request):
@@ -881,24 +1087,12 @@ class ManagerPoliciesView(APIView):
 class ManagerPendingPoliciesView(APIView):
     """
     Manager approvals inbox for POLICIES/PLANS.
-
-    Returns customer plans within scope, regardless of Status (pending/approved/rejected).
-    Scope:
-    - Admins/Superusers: see ALL customer plans.
-    - Managers: only plans for customers whose TeamID matches the manager's TeamID
-      as defined in the supervisors collection (UserID -> TeamID).
-    The endpoint path keeps '/pending/' for backward compatibility with the UI.
-
-    GET:
-    - Output (200): { "policies": [ { PolicyID, CustomerID, Status, CreatedAt, policy_name?, planID } ] }
     """
 
     def get(self, request):
         """
         Determine policies strictly by supervisor -> team -> customers mapping
-        using the x-user-id provided. This endpoint intentionally does not
-        require an authenticated User document; it relies on the supervisor
-        record as the source of truth for team scoping, per requirements.
+        using the x-user-id provided.
         """
 
         try:
@@ -908,12 +1102,12 @@ class ManagerPendingPoliciesView(APIView):
             headers = getattr(request, "headers", {}) or {}
             meta = getattr(request, "META", {}) or {}
             uid = (
-                headers.get("x-user-id")
-                or headers.get("X-User-ID")
-                or headers.get("userid")
-                or headers.get("UserID")
-                or meta.get("HTTP_X_USER_ID")
-                or meta.get("HTTP_USERID")
+                    headers.get("x-user-id")
+                    or headers.get("X-User-ID")
+                    or headers.get("userid")
+                    or headers.get("UserID")
+                    or meta.get("HTTP_X_USER_ID")
+                    or meta.get("HTTP_USERID")
             )
             if not uid:
                 qp = getattr(request, "query_params", None) or getattr(request, "GET", {})
@@ -1039,8 +1233,8 @@ class ManagerPendingPoliciesView(APIView):
                 pid = _normalize_plan_id(_get_field(cp, 'planID', 'PlanID'))
                 # Prefer name from catalog, else fall back to any embedded name in the plan document
                 return (
-                    name_by_id.get(pid)
-                    or _get_field(cp, 'PlanName', 'policy_name')
+                        name_by_id.get(pid)
+                        or _get_field(cp, 'PlanName', 'policy_name')
                 )
 
             def _status_for(cp):
@@ -1085,12 +1279,6 @@ class ManagerPendingPoliciesView(APIView):
 class ManagerAssignablePoliciesView(APIView):
     """
     Manager Assign Policies list.
-    Similar to ManagerPendingPoliciesView but returns only customer plans within
-    the manager's team scope that DO NOT have an assigned agent set on the
-    customerPlans document (assignedAgentID/AssignedAgentID). No status filter is applied.
-
-    GET:
-    - Output: { "policies": [ ... ] }
     """
 
     def get(self, request):
@@ -1197,10 +1385,6 @@ class ManagerAssignablePoliciesView(APIView):
 class ManagerAssignPolicyView(APIView):
     """
     Assign a customer plan (policy) to an agent by setting assignedAgentID on the plan.
-    Steps:
-    - Validate manager permissions and payload containing agentUserID.
-    - Locate the CustomerPlan by its CustomerPlanID.
-    - Update the CustomerPlan.assignedAgentID and return it.
     """
 
     def post(self, request, policy_id: int):
@@ -1245,9 +1429,10 @@ class ManagerAssignPolicyView(APIView):
                 })
                 print("DEBUG: Raw update command sent.")
             except Exception as e:
-                return Response({"error": f"Failed to update policy assignment: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({"error": f"Failed to update policy assignment: {e}"},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            return Response({"ok": True,  "assignedAgentID": agent_user_id}, status=status.HTTP_200_OK)
+            return Response({"ok": True, "assignedAgentID": agent_user_id}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1255,11 +1440,6 @@ class ManagerAssignPolicyView(APIView):
 class ManagerPolicyDecisionView(APIView):
     """
     Manager approves or rejects a pending policy.
-
-    POST:
-    - Input: {"decision": "approve"|"reject"}.
-    - Constraint: Policy must currently be 'pending'.
-    - Output (200): {"ok": true, "newStatus": "approved"}
     """
 
     def post(self, request, policy_id: int):
@@ -1316,7 +1496,8 @@ class ManagerPolicyDecisionView(APIView):
                         {"$set": {"Status": new_status, "UpdatedAt": _now_utc()}},
                     )
                 except Exception as ue:
-                    return Response({"error": f"Failed to update CustomerPlan: {ue}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return Response({"error": f"Failed to update CustomerPlan: {ue}"},
+                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
                 # Audit log (non-fatal if fails)
                 try:
@@ -1349,7 +1530,8 @@ class ManagerPolicyDecisionView(APIView):
                     {"$set": {"Status": new_status, "UpdatedAt": _now_utc()}},
                 )
             except Exception as ue:
-                return Response({"error": f"Failed to update Policy: {ue}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({"error": f"Failed to update Policy: {ue}"},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             try:
                 AuditLog(
@@ -1372,11 +1554,6 @@ class ManagerPolicyDecisionView(APIView):
 class AdminAuditLogView(APIView):
     """
     The 'Big Brother' view. Admins can see the last 500 actions taken in the system.
-
-    GET:
-    - Input: None.
-    - Output (200): List of 500 most recent logs.
-      { "logs": [ { "Action": "claim_update", ... } ] }
     """
 
     def get(self, request):
@@ -1407,15 +1584,6 @@ class AdminAuditLogView(APIView):
 class ManagerAssignCustomerView(APIView):
     """
     Allows a supervisor/manager to assign a customer to an agent on their team.
-
-    POST /api/manager/customers/<customer_id>/assign/
-    Body: { "agentUserID": 77 }
-
-    Rules:
-    - Requesting user must be a manager/supervisor (or admin).
-    - agentUserID must belong to the manager's direct reports (unless admin).
-    - Sets Customer.AssignedAgentUserID = agentUserID.
-    - Writes an audit log.
     """
 
     def post(self, request, customer_id: int):
@@ -1463,7 +1631,8 @@ class ManagerAssignCustomerView(APIView):
                 CreatedAt=_now_utc(),
             ).save()
 
-            return Response({"ok": True, "CustomerID": customer.CustomerID, "AssignedAgentUserID": agent_user_id}, status=status.HTTP_200_OK)
+            return Response({"ok": True, "CustomerID": customer.CustomerID, "AssignedAgentUserID": agent_user_id},
+                            status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1471,24 +1640,6 @@ class ManagerAssignCustomerView(APIView):
 class ClaimListCreateView(APIView):
     """
     The main endpoint for getting lists of claims or creating a new one.
-
-    GET:
-    - Shows claims based on who you are:
-      1. Managers/Admins -> See everything.
-      2. Agents -> See only claims assigned to them.
-      3. Customers -> See only their own claims.
-    - Output (200): { "claims": [...] }
-
-    POST:
-    - Creates a new claim.
-    - Input (JSON):
-      {
-        "CustomerID": 456, (Required, unless you are the customer, then we infer it)
-        "Reason": "Fire",
-        "Amount": 500,
-        ...
-      }
-    - Output (201): {"created": true, "ClaimID": 124}
     """
 
     def get(self, request):
@@ -1516,6 +1667,7 @@ class ClaimListCreateView(APIView):
                     "ClaimID": c.ClaimID,
                     "CustomerID": c.CustomerID,
                     "PolicyID": c.PolicyID,
+                    "CustomerPlanID": getattr(c, "CustomerPlanID", None),
                     "AssignedToUserID": c.AssignedToUserID,
                     "Status": c.Status,
                     "Amount": c.Amount,
@@ -1555,6 +1707,7 @@ class ClaimListCreateView(APIView):
             claim_id = g("ClaimID", "claim_id")
             customer_id = g("CustomerID", "customer_id")
             policy_id = g("PolicyID", "policy_id")
+            customer_plan_id = g("CustomerPlanID", "customerPlanID", "customer_plan_id")
             amount = g("Amount", "amount")
             reason = g("Reason", "reason")
             assigned_to = g("AssignedToUserID", "assigned_to_user_id")
@@ -1587,6 +1740,8 @@ class ClaimListCreateView(APIView):
             claim_id = int(claim_id)
             customer_id = int(customer_id)
             policy_id = int(policy_id) if policy_id is not None and str(policy_id) != "" else None
+            customer_plan_id = int(customer_plan_id) if customer_plan_id is not None and str(
+                customer_plan_id) != "" else None
 
             # If agent creates it, they can assign it to themselves automatically
             assigned_to = int(assigned_to) if assigned_to is not None and str(assigned_to) != "" else (
@@ -1599,10 +1754,43 @@ class ClaimListCreateView(APIView):
             if Claim.objects(ClaimID=claim_id).first():
                 return Response({"error": "ClaimID already exists"}, status=status.HTTP_409_CONFLICT)
 
+            # Ensure we have a valid CustomerPlanID for this claim. If not supplied,
+            # try to infer from first item (if items reference a plan).
+            plan_doc = None
+            if customer_plan_id is not None:
+                plan_doc = CustomerPlan.objects(CustomerPlanID=customer_plan_id).first()
+                if not plan_doc:
+                    return Response({"error": "CustomerPlanID not found"}, status=status.HTTP_400_BAD_REQUEST)
+            elif item_ids:
+                try:
+                    itm = Item.objects(ItemID=int(item_ids[0])).first()
+                except Exception:
+                    itm = None
+                if itm is not None:
+                    inferred_cpid = getattr(itm, "CustomerPlanID", None) or (
+                        getattr(itm, "_data", {}).get("CustomerPlanID") if hasattr(itm, "_data") else None
+                    )
+                    if inferred_cpid is not None:
+                        customer_plan_id = int(inferred_cpid)
+                        plan_doc = CustomerPlan.objects(CustomerPlanID=customer_plan_id).first()
+            # If still no plan, require it
+            if plan_doc is None:
+                return Response({"error": "Missing field: CustomerPlanID"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate that CustomerID matches the plan's owner
+            try:
+                plan_customer_id = int(getattr(plan_doc, "CustomerID", None) or plan_doc._data.get("CustomerID"))
+            except Exception:
+                plan_customer_id = None
+            if plan_customer_id is not None and int(customer_id) != int(plan_customer_id):
+                return Response({"error": "CustomerID does not match the CustomerPlan owner"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
             claim = Claim(
                 ClaimID=claim_id,
                 CustomerID=customer_id,
                 PolicyID=policy_id,
+                CustomerPlanID=customer_plan_id,
                 AssignedToUserID=assigned_to,
                 Status=str(status_str or "submitted"),
                 Reason=reason,
@@ -1631,16 +1819,6 @@ class ClaimListCreateView(APIView):
 class ItemListCreateView(APIView):
     """
     Standard List/Create view for Items (like cameras, laptops, etc.).
-
-    GET:
-    - Lists all items.
-    - Output (200): { "items": [...] }
-
-    POST:
-    - Creates a new item.
-    - Permission: Managers only.
-    - Input: {"ItemID": 11, "Name": "Camera", "Value": 800}.
-    - Output (201): {"created": true, "ItemID": 11}
     """
 
     def get(self, request):
@@ -1704,19 +1882,6 @@ class ItemListCreateView(APIView):
 class ItemDetailView(APIView):
     """
     CRUD for a single Item.
-
-    GET:
-    - Get details.
-    - Output (200): JSON object of the item.
-
-    PUT:
-    - Update details (Manager only).
-    - Input: JSON body fields.
-    - Output (200): {"ok": true}
-
-    DELETE:
-    - Delete item (Manager only).
-    - Output (200): {"ok": true}
     """
 
     def get(self, request, item_id: int):
@@ -1806,17 +1971,6 @@ class ItemDetailView(APIView):
 class PolicyListCreateView(APIView):
     """
     List and Create Policies.
-
-    GET:
-    - List policies.
-    - Managers/Admins see all. Agents see their assigned clients'. Customers see their own.
-    - Output (200): { "policies": [...] }
-
-    POST:
-    - Create a policy.
-    - Permission: Managers only.
-    - Input: {"PolicyID": 902, "CustomerID": 457}.
-    - Output (201): {"created": true, "PolicyID": 902}
     """
 
     def get(self, request):
@@ -1895,19 +2049,6 @@ class PolicyListCreateView(APIView):
 class PolicyDetailView(APIView):
     """
     CRUD for a single Policy.
-
-    GET:
-    - Get policy details.
-    - Output (200): JSON object of the policy.
-
-    PUT:
-    - Update policy (Manager only).
-    - Input: JSON body fields.
-    - Output (200): {"ok": true}
-
-    DELETE:
-    - Delete policy (Admin only).
-    - Output (200): {"ok": true}
     """
 
     def get(self, request, etc: int):
