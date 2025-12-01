@@ -106,6 +106,7 @@ class CustomerPlan(Document):
     PlanName = StringField(required=False, db_field="PlanName")
     coverageLim = FloatField(required=False, db_field="coverageLim")
     Description = StringField(required=False, db_field="Description")
+    assignedAgentID = IntField(required=False, null=True, db_field="assignedAgentID")
 
     meta = {
         'collection': 'customerPlans',
