@@ -6,6 +6,7 @@ import SubmitClaimModal from "./userHomePage/submitClaim.jsx";
 import ManagerHomePage from "./managerHomePage/managerHomePage.jsx";
 import AgentHomePage from "./agentHomePage/agentHomePage.jsx";
 import UserClaimsPage from "./userHomePage/userClaimPage.jsx";
+import AdminHomePage from "./adminHomePage/adminHomePage.jsx";
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/managerHomePage" element={<ManagerHomePage />} />
         <Route path="/agentHomePage" element={<AgentHomePage />} />
         <Route path="/userClaims" element={<UserClaimsPage />} />
+        <Route path="/adminHomePage" element={<AdminHomePage />} />
       </Routes>
     </div>
   );
