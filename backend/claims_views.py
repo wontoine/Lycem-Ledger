@@ -1056,8 +1056,8 @@ class ManagerAssignablePoliciesView(APIView):
     """
     Manager Assign Policies list.
     Similar to ManagerPendingPoliciesView but returns only customer plans within
-    the manager's team scope that DO NOT have an assignmentID set in the
-    customerPlans document. No status filter is applied.
+    the manager's team scope that DO NOT have an assigned agent set on the
+    customerPlans document (assignedAgentID/AssignedAgentID). No status filter is applied.
 
     GET:
     - Output: { "policies": [ ... ] }
@@ -1092,7 +1092,7 @@ class ManagerAssignablePoliciesView(APIView):
             if not cust_ids:
                 return Response({"policies": []}, status=status.HTTP_200_OK)
 
-            # Customer plans for these customers that are missing assignmentID
+            # Customer plans for these customers that are missing an assigned agent
             plans = CustomerPlan.objects(CustomerID__in=cust_ids)
 
             def _get(cp, *names, default=None):
@@ -1116,11 +1116,11 @@ class ManagerAssignablePoliciesView(APIView):
                 except Exception:
                     return val
 
-            # filter missing assignmentID (support multiple possible field names)
+            # Filter plans that have not been assigned to an agent yet
             filtered = []
             for cp in plans:
-                # Consider any of these as an assignment marker
-                has_assign = _get(cp, 'assignmentID', 'AssignmentID', 'AssignedAgentID', 'assignedAgentID')
+                # Consider any of these as an assignment marker (support field casing variants)
+                has_assign = _get(cp, 'assignedAgentID')
                 if has_assign in (None, 0, "", "0"):
                     filtered.append(cp)
 
@@ -1166,17 +1166,14 @@ class ManagerAssignablePoliciesView(APIView):
 
 class ManagerAssignPolicyView(APIView):
     """
-    Assign a customer plan (policy) to an agent by creating a new AssignmentID.
+    Assign a customer plan (policy) to an agent by setting assignedAgentID on the plan.
     Steps:
-    - Compute max AssignmentID from Plan_agent_Assignment, increment by 1.
-    - Insert new record into Plan_agent_Assignment.
-    - Update the selected agent's document (User) with assignmentID.
-    - Update the corresponding customer plan with assignmentID.
+    - Validate manager permissions and payload containing agentUserID.
+    - Locate the CustomerPlan by its CustomerPlanID.
+    - Update the CustomerPlan.assignedAgentID and return it.
     """
 
     def post(self, request, policy_id: int):
-        from users.models import PlanAgentAssignment  # local import to avoid circulars
-
         user, err = _require_user(request)
         if err:
             return err
@@ -1208,46 +1205,14 @@ class ManagerAssignPolicyView(APIView):
             if not cp:
                 return Response({"error": "Policy not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            # Generate next AssignmentID (max + 1)
+            # Update CustomerPlan with assignedAgentID only
             try:
-                last = PlanAgentAssignment.objects.order_by('-AssignmentID').first()
-                next_id = (getattr(last, 'AssignmentID', 0) or 0) + 1
-            except Exception:
-                next_id = 1
+                setattr(cp, 'assignedAgentID', agent_user_id)
+                cp.save()
+            except Exception as e:
+                return Response({"error": f"Failed to update policy assignment: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Insert into Plan_agent_Assignment
-            PlanAgentAssignment(AssignmentID=next_id).save()
-
-            # Update Agent (User) with assignmentID (dynamic field tolerated)
-            u = User.objects(userid=agent_user_id).first()
-            if u:
-                setattr(u, 'assignmentID', next_id)
-                try:
-                    # also set capitalized variant for legacy clients
-                    setattr(u, 'AssignmentID', next_id)
-                except Exception:
-                    pass
-                u.save()
-
-            # Update Agent collection row linked by UserID
-            ag = Agent.objects(__raw__={"userID": agent_user_id}).first()
-            if ag:
-                try:
-                    setattr(ag, 'assignmentID', next_id)
-                    setattr(ag, 'AssignmentID', next_id)
-                except Exception:
-                    pass
-                ag.save()
-
-            # Update CustomerPlan with assignmentID
-            setattr(cp, 'assignmentID', next_id)
-            try:
-                setattr(cp, 'AssignmentID', next_id)
-            except Exception:
-                pass
-            cp.save()
-
-            return Response({"ok": True, "AssignmentID": next_id}, status=status.HTTP_200_OK)
+            return Response({"ok": True, "assignedAgentID": agent_user_id}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

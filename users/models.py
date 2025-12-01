@@ -95,6 +95,8 @@ class CustomerPlan(Document):
     """
     CustomerPlanID = IntField(required=True, unique=True, db_field="CustomerPlanID")
     CustomerID = IntField(required=True, db_field="CustomerID")
+    # Manager/assignment integration: track which agent user is assigned to this plan
+    assignedAgentID = IntField(required=False, db_field="assignedAgentID")
     # Optional fields to align with existing documents
     StartDate = DateTimeField(required=False, db_field="StartDate")
     EndDate = DateTimeField(required=False, db_field="EndDate")
@@ -198,26 +200,6 @@ class Agent(Document):
         uid = getattr(self, 'UserID', None)
         tid = getattr(self, 'TeamID', None)
         return f"Agent AgentID={aid} UserID={uid} TeamID={tid}"
-
-
-class PlanAgentAssignment(Document):
-    """
-    Represents the assignment registry. Per requirements, this collection only
-    stores the generated AssignmentID values.
-
-    Example document:
-    { "AssignmentID": 1001 }
-    """
-    AssignmentID = IntField(required=True, unique=True, db_field="AssignmentID")
-
-    meta = {
-        'collection': 'Plan_agent_Assignment',
-        'auto_create_index': False,
-        'strict': False,
-        'indexes': [
-            {'fields': ['AssignmentID'], 'unique': True},
-        ],
-    }
 
 
 class User(Document):
