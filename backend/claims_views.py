@@ -272,10 +272,14 @@ class AgentClaimsDashboard(APIView):
 
 class AgentCreatePlanView(APIView):
     """
-    Agent creates a new insurance plan entry in insurancePlans.
-    - planID auto-assigned as max+1
-    - PlanName must be unique (case-insensitive)
-    - Optional fields: Description, CoverageLim, BasePrice
+    Agent creates a new customer plan entry in customerPlans.
+    - customerPlanID auto-assigned as max+1
+    - planID fixed to 4
+    - Status fixed to "Active"
+    - CurrentPremium taken from BasePrice
+    - StartDate = now (UTC), EndDate = StartDate + 365 days
+    - Requires CustomerID in payload
+    Optional fields: PlanName, CoverageLim, Description.
     """
 
     def post(self, request):
@@ -286,55 +290,61 @@ class AgentCreatePlanView(APIView):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         data = request.data if isinstance(request.data, dict) else {}
+
+        # Required fields
         plan_name = str(data.get("PlanName") or "").strip()
         if not plan_name:
             return Response({"error": {"PlanName": "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Ensure PlanName uniqueness (case-insensitive)
         try:
-            existing = InsurancePlan.objects(__raw__={
-                "PlanName": {"$regex": f"^{plan_name}$", "$options": "i"}
-            }).first()
-            if existing:
-                return Response({"error": "PlanName already exists"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            msg = "Database connection error"
-            if settings.DEBUG:
-                msg = f"Database error: {e}"
-            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # Generate next planID
-        try:
-            last = InsurancePlan.objects.order_by("-planID").first()
-            last_id = getattr(last, "planID", None) or getattr(last, "PlanID", None)
-            next_id = (last_id + 1) if last_id is not None else 1
+            customer_id = int(data.get("CustomerID"))
         except Exception:
-            next_id = 1
+            return Response({"error": {"CustomerID": "Must be an integer"}}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            base_price = float(data.get("BasePrice"))
+        except Exception:
+            return Response({"error": {"BasePrice": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Optional fields
         desc = str(data.get("Description")).strip() if data.get("Description") else None
         coverage = data.get("CoverageLim")
-        base_price = data.get("BasePrice")
         try:
             coverage_val = float(coverage) if coverage not in (None, "") else None
         except Exception:
             return Response({"error": {"CoverageLim": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate next CustomerPlanID
         try:
-            base_price_val = float(base_price) if base_price not in (None, "") else None
+            last = CustomerPlan.objects.order_by("-CustomerPlanID").first()
+            last_id = None
+            if last:
+                last_id = getattr(last, "CustomerPlanID", None)
+                if last_id is None and hasattr(last, "_data"):
+                    last_id = last._data.get("CustomerPlanID") or last._data.get("customerPlanID")
+            next_cpid = (int(last_id) + 1) if last_id is not None else 1
         except Exception:
-            return Response({"error": {"BasePrice": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
+            next_cpid = 1
+
+        start_dt = timezone.now()
+        end_dt = start_dt + timedelta(days=365)
 
         try:
-            plan = InsurancePlan(planID=next_id, PlanName=plan_name)
+            plan = CustomerPlan(
+                CustomerPlanID=next_cpid,
+                CustomerID=customer_id,
+                StartDate=start_dt,
+                EndDate=end_dt,
+                CurrentPremium=base_price,
+                Status="Active",
+                planID=4,
+            )
+            # Optional extras (strict=False allows these)
+            plan.PlanName = plan_name
             if desc:
                 plan.Description = desc
             if coverage_val is not None:
-                plan.CoverageLim = coverage_val
-            if base_price_val is not None:
-                plan.BasePrice = base_price_val
+                plan.coverageLim = coverage_val
             plan.save()
         except Exception as e:
-            msg = "Unable to create plan"
+            msg = "Unable to create customer plan"
             if settings.DEBUG:
                 msg = f"Create failed: {e}"
             return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -342,11 +352,16 @@ class AgentCreatePlanView(APIView):
         return Response(
             {
                 "created": True,
-                "planID": next_id,
+                "customerPlanID": next_cpid,
+                "CustomerID": customer_id,
+                "planID": 4,
+                "Status": "Active",
+                "CurrentPremium": base_price,
+                "StartDate": start_dt.isoformat(),
+                "EndDate": end_dt.isoformat(),
                 "PlanName": plan_name,
                 "Description": desc,
                 "CoverageLim": coverage_val,
-                "BasePrice": base_price_val,
             },
             status=status.HTTP_201_CREATED,
         )
