@@ -527,6 +527,20 @@ class Claim(Document):
     ItemIDs = ListField(IntField(), default=list)
     CreatedAt = DateTimeField(default=datetime.utcnow)
     UpdatedAt = DateTimeField(default=datetime.utcnow)
+    # Agent-specific decision fields
+    # Tracks the agent's approval decision independent of overall workflow status
+    agentApprovalStatus = StringField(required=False, choices=(
+        'pending', 'approved', 'rejected'
+    ), default='pending')
+    # Optional note the agent can provide, e.g., for rejection reason
+    agentStatusNote = StringField(required=False)
+    # Manager-specific decision fields (final approval step)
+    managerApprovalStatus = StringField(required=False, choices=(
+        'pending', 'approved', 'rejected'
+    ), default='pending')
+    managerNotes = StringField(required=False)
+    managerApprovedAt = DateTimeField(required=False, null=True)
+    managerUserID = IntField(required=False, null=True)
 
     meta = {
         'collection': 'claims',
@@ -536,6 +550,8 @@ class Claim(Document):
             {'fields': ['CustomerPlanID'], 'sparse': True},
             {'fields': ['AssignedToUserID'], 'sparse': True},
             {'fields': ['Status']},
+            {'fields': ['agentApprovalStatus'], 'sparse': True},
+            {'fields': ['managerApprovalStatus'], 'sparse': True},
         ],
         'strict': False,
     }

@@ -12,6 +12,10 @@ function ManagerHomePage() {
   const [fetchError, setFetchError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [assignmentSelections, setAssignmentSelections] = useState({});
+  // Manager final approvals
+  const [managerClaims, setManagerClaims] = useState([]);
+  const [managerNotes, setManagerNotes] = useState({}); // { [claimId]: note }
+  const [managerBusy, setManagerBusy] = useState({}); // { [claimId]: boolean }
 
   const navigate = useNavigate();
 
@@ -25,6 +29,7 @@ function ManagerHomePage() {
 
   const navItems = [
     { id: "approvals", name: "Pending Approvals" },
+    { id: "final", name: "Final Approvals" },
     { id: "assign", name: "Assign Policies" },
     { id: "overview", name: "Agent Overview" },
   ];
@@ -47,7 +52,7 @@ function ManagerHomePage() {
         "x-user-id": String(storedUserID),
       };
 
-      const [pendingRes, agentsRes, allPolRes] = await Promise.all([
+      const [pendingRes, agentsRes, allPolRes, mgrClaimsRes] = await Promise.all([
         fetch("http://127.0.0.1:8000/api/manager/policies/pending/", {
           headers,
         }),
@@ -55,11 +60,13 @@ function ManagerHomePage() {
         fetch("http://127.0.0.1:8000/api/manager/policies/assignable/", {
           headers,
         }),
+        fetch("http://127.0.0.1:8000/api/supervisor/claims/", { headers }),
       ]);
 
       const pendingData = await pendingRes.json();
       const agentsData = await agentsRes.json();
       const allPolData = await allPolRes.json();
+      const mgrClaimsData = await mgrClaimsRes.json();
 
       console.log("Fetched Data:", { pendingData, agentsData, allPolData });
       setCustomerPlans(pendingData.policies || []);
@@ -71,6 +78,7 @@ function ManagerHomePage() {
       setPendingPolicies(onlyPending);
       setAgents(agentsData.employees || []);
       setAllPolicies(allPolData.policies || []);
+      setManagerClaims(mgrClaimsData.claims || []);
     } catch (error) {
       console.error("Fetch error:", error);
       setFetchError("Could not load live data. Using offline mode.");
@@ -99,6 +107,21 @@ function ManagerHomePage() {
       setAgents([
         { userid: 101, username: "agent_smith", role: "agent" },
         { userid: 102, username: "agent_doe", role: "agent" },
+      ]);
+      // Offline example claims needing manager final approval
+      setManagerClaims([
+        {
+          ClaimID: 5001,
+          CustomerID: 3001,
+          PolicyID: 801,
+          CustomerPlanID: 801,
+          AssignedToUserID: 101,
+          Status: "accepted",
+          Amount: 1200,
+          Reason: "Water damage",
+          agentApprovalStatus: "approved",
+          agentStatusNote: "Verified receipts",
+        },
       ]);
     } finally {
       setLoading(false);
@@ -351,6 +374,126 @@ function ManagerHomePage() {
     );
   };
 
+  const handleManagerDecision = async (claimId, decision) => {
+    // decision: "approve" | "deny"
+    setManagerBusy((prev) => ({ ...prev, [claimId]: true }));
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/supervisor/claims/${claimId}/decision/`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": String(storedUserID),
+          },
+          body: JSON.stringify({
+            decision,
+            managerNotes: managerNotes[claimId] || "",
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to submit decision");
+      }
+      // Remove claim from list as it's no longer pending final approval
+      setManagerClaims((prev) => prev.filter((c) => c.ClaimID !== claimId));
+      // Cleanup note state
+      setManagerNotes((prev) => {
+        const next = { ...prev };
+        delete next[claimId];
+        return next;
+      });
+    } catch (e) {
+      console.error(e);
+      alert(`Action failed: ${e.message}`);
+    } finally {
+      setManagerBusy((prev) => ({ ...prev, [claimId]: false }));
+    }
+  };
+
+  const renderFinalApprovalsTab = () => {
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+        <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+          <h3 className="text-lg font-bold text-gray-700">Claims Awaiting Final Approval</h3>
+          <span className="bg-purple-100 text-purple-800 text-xs font-bold px-2 py-1 rounded-full">
+            {managerClaims.length} Pending
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-gray-600">
+            <thead className="bg-gray-100 uppercase text-gray-500 font-bold">
+              <tr>
+                <th className="p-4">Claim ID</th>
+                <th className="p-4">Customer</th>
+                <th className="p-4">Plan/Policy</th>
+                <th className="p-4">Amount</th>
+                <th className="p-4">Agent Note</th>
+                <th className="p-4">Manager Notes</th>
+                <th className="p-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {managerClaims.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="p-8 text-center text-gray-400 italic">
+                    Nothing to approve. You're all caught up!
+                  </td>
+                </tr>
+              ) : (
+                managerClaims.map((c) => (
+                  <tr key={c.ClaimID} className="border-t">
+                    <td className="p-4 font-mono">{c.ClaimID}</td>
+                    <td className="p-4">{c.CustomerID}</td>
+                    <td className="p-4">{c.CustomerPlanID || c.PolicyID || "—"}</td>
+                    <td className="p-4">{c.Amount != null ? `$${c.Amount}` : "—"}</td>
+                    <td className="p-4 max-w-xs">
+                      <div className="text-gray-500 text-xs whitespace-pre-wrap">
+                        {c.agentStatusNote || "(no note)"}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <input
+                        type="text"
+                        value={managerNotes[c.ClaimID] || ""}
+                        onChange={(e) =>
+                          setManagerNotes((prev) => ({ ...prev, [c.ClaimID]: e.target.value }))
+                        }
+                        placeholder="Add a note (optional)"
+                        className="w-64 border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                      />
+                    </td>
+                    <td className="p-4">
+                      {managerBusy[c.ClaimID] ? (
+                        <span className="text-gray-400 italic">Processing…</span>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleManagerDecision(c.ClaimID, "approve")}
+                            className="bg-green-500 hover:bg-green-600 text-white font-semibold px-3 py-1 rounded"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleManagerDecision(c.ClaimID, "deny")}
+                            className="bg-red-500 hover:bg-red-600 text-white font-semibold px-3 py-1 rounded"
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderOverviewTab = () => {
     const getassignedAgentID = (p) => {
       const v =
@@ -549,6 +692,10 @@ function ManagerHomePage() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {activeTab === "final" && (
+                <div className="max-w-6xl mx-auto">{renderFinalApprovalsTab()}</div>
               )}
 
               {activeTab === "assign" && (

@@ -364,6 +364,8 @@ class AgentClaimsDashboard(APIView):
                     "CustomerID": c.CustomerID,
                     "PolicyID": c.PolicyID,
                     "CustomerPlanID": getattr(c, "CustomerPlanID", None),
+                    "agentApprovalStatus": getattr(c, "agentApprovalStatus", None),
+                    "agentStatusNote": getattr(c, "agentStatusNote", None),
                     "Status": c.Status,
                     "Amount": c.Amount,
                     "Reason": c.Reason,
@@ -676,6 +678,8 @@ class ClaimDetailView(APIView):
                     "CustomerPlanID": getattr(claim, "CustomerPlanID", None),
                     "AssignedToUserID": claim.AssignedToUserID,
                     "Status": claim.Status,
+                    "agentApprovalStatus": getattr(claim, "agentApprovalStatus", None),
+                    "agentStatusNote": getattr(claim, "agentStatusNote", None),
                     "Amount": claim.Amount,
                     "Reason": claim.Reason,
                     "ItemIDs": list(claim.ItemIDs or []),
@@ -725,6 +729,8 @@ class ClaimDetailView(APIView):
                 "CustomerPlanID": (lambda v: int(v) if v is not None else None),
                 "AssignedToUserID": (lambda v: int(v) if v is not None else None),
                 "Status": str,
+                "agentApprovalStatus": (lambda v: (str(v).lower() if v is not None else None)),
+                "agentStatusNote": (lambda v: v),
                 "Reason": (lambda v: v),
                 "Amount": (lambda v: float(v) if v is not None else None),
                 "ItemIDs": (lambda v: list(v) if isinstance(v, (list, tuple)) else []),
@@ -808,6 +814,7 @@ class ClaimDecisionView(APIView):
 
         decision = (request.data.get("decision") or "").strip().lower()
         reason = request.data.get("reason")
+        note = request.data.get("note") or request.data.get("agentStatusNote") or reason
 
         # Validate input
         if decision not in ("accept", "reject"):
@@ -822,8 +829,13 @@ class ClaimDecisionView(APIView):
             if claim.AssignedToUserID not in (None, user.userid) and not _is_manager(user) and not _is_admin(user):
                 return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
+            # Maintain legacy overall Status for compatibility
             claim.Status = "accepted" if decision == "accept" else "rejected"
             claim.Reason = reason or claim.Reason
+            # Set new agent-specific fields
+            claim.agentApprovalStatus = "approved" if decision == "accept" else "rejected"
+            if note is not None:
+                claim.agentStatusNote = note
             claim.UpdatedAt = _now_utc()
             claim.save()
 
@@ -833,11 +845,16 @@ class ClaimDecisionView(APIView):
                 Action=f"claim_{decision}",
                 TargetType="claim",
                 TargetID=str(claim.ClaimID),
-                Details={"reason": reason} if reason else None,
+                Details={"reason": reason, "agentApprovalStatus": claim.agentApprovalStatus, "agentStatusNote": getattr(claim, "agentStatusNote", None)},
                 CreatedAt=_now_utc(),
             ).save()
 
-            return Response({"ok": True, "newStatus": claim.Status}, status=status.HTTP_200_OK)
+            return Response({
+                "ok": True,
+                "newStatus": claim.Status,
+                "agentApprovalStatus": claim.agentApprovalStatus,
+                "agentStatusNote": getattr(claim, "agentStatusNote", None)
+            }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -854,23 +871,73 @@ class SupervisorClaimsReviewList(APIView):
         if not (_is_manager(user) or _is_admin(user)):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
-            claims = Claim.objects(Status="accepted")
-            data = [
-                {
+            # Determine manager's team agent user IDs (if available)
+            team_agent_user_ids = []
+            try:
+                sup = Supervisor.objects(UserID=user.userid).first()
+                if not sup:
+                    sup = Supervisor.objects(__raw__={"$or": [
+                        {"UserID": user.userid},
+                        {"userID": user.userid},
+                    ]}).first()
+                team_id = getattr(sup, 'TeamID', None) if sup else None
+                if team_id is not None:
+                    try:
+                        team_agents = list(Agent.objects(__raw__={"$or": [
+                            {"TeamID": team_id},
+                            {"teamID": team_id},
+                        ]}))
+                    except Exception:
+                        team_agents = []
+                    # collect agent userIDs with multiple casing fallbacks
+                    for a in team_agents:
+                        uid = None
+                        try:
+                            uid = getattr(a, 'UserID', None)
+                        except Exception:
+                            uid = None
+                        if uid is None and hasattr(a, '_data'):
+                            uid = a._data.get('UserID') or a._data.get('userID')
+                        if uid is not None:
+                            team_agent_user_ids.append(uid)
+            except Exception:
+                team_agent_user_ids = []
+
+            # Filter claims needing manager decision:
+            # - agentApprovalStatus == 'approved'
+            # - managerApprovalStatus missing/None/'pending'
+            raw_query = {
+                "agentApprovalStatus": "approved",
+                "$or": [
+                    {"managerApprovalStatus": {"$exists": False}},
+                    {"managerApprovalStatus": None},
+                    {"managerApprovalStatus": "pending"},
+                ],
+            }
+            if team_agent_user_ids:
+                raw_query["AssignedToUserID"] = {"$in": team_agent_user_ids}
+
+            claims = Claim.objects(__raw__=raw_query)
+
+            data = []
+            for c in claims:
+                data.append({
                     "ClaimID": c.ClaimID,
                     "CustomerID": c.CustomerID,
-                    "PolicyID": c.PolicyID,
+                    "PolicyID": getattr(c, "PolicyID", None),
                     "CustomerPlanID": getattr(c, "CustomerPlanID", None),
-                    "AssignedToUserID": c.AssignedToUserID,
-                    "Status": c.Status,
-                    "Amount": c.Amount,
-                    "Reason": c.Reason,
-                    "ItemIDs": list(c.ItemIDs or []),
-                    "CreatedAt": c.CreatedAt,
-                    "UpdatedAt": c.UpdatedAt,
-                }
-                for c in claims
-            ]
+                    "AssignedToUserID": getattr(c, "AssignedToUserID", None),
+                    "Status": getattr(c, "Status", None),
+                    "Amount": getattr(c, "Amount", None),
+                    "Reason": getattr(c, "Reason", None),
+                    "ItemIDs": list(getattr(c, "ItemIDs", []) or []),
+                    "CreatedAt": getattr(c, "CreatedAt", None),
+                    "UpdatedAt": getattr(c, "UpdatedAt", None),
+                    "agentApprovalStatus": getattr(c, "agentApprovalStatus", None),
+                    "agentStatusNote": getattr(c, "agentStatusNote", None),
+                    "managerApprovalStatus": getattr(c, "managerApprovalStatus", None),
+                    "managerNotes": getattr(c, "managerNotes", None),
+                })
             return Response({"claims": data}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -890,6 +957,7 @@ class SupervisorClaimDecisionView(APIView):
 
         decision = (request.data.get("decision") or "").strip().lower()
         reason = request.data.get("reason")
+        note = request.data.get("note") or request.data.get("managerNotes") or reason
         if decision not in ("approve", "deny"):
             return Response({"error": "Invalid decision"}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -897,15 +965,20 @@ class SupervisorClaimDecisionView(APIView):
             if not claim:
                 return Response({"error": "Claim not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            # Workflow check: Manager may decide on claims awaiting approval.
-            # Support both legacy flow ('accepted' by agent) and the simplified
-            # requirement where manager acts on 'pending' claims.
-            if (claim.Status or "").lower() not in ("accepted", "pending"):
-                return Response({"error": "Only pending or accepted claims can be decided by supervisor"},
-                                status=status.HTTP_400_BAD_REQUEST)
+            # Require agent approval before manager final decision
+            if (getattr(claim, 'agentApprovalStatus', None) or '').lower() != 'approved':
+                return Response({"error": "Claim is not ready for manager decision"}, status=status.HTTP_400_BAD_REQUEST)
 
-            claim.Status = "approved" if decision == "approve" else "denied"
-            claim.Reason = reason or claim.Reason
+            # Update manager-specific fields
+            claim.managerApprovalStatus = 'approved' if decision == 'approve' else 'rejected'
+            if note is not None:
+                claim.managerNotes = note
+            claim.managerApprovedAt = _now_utc()
+            claim.managerUserID = user.userid
+            # Keep legacy overall status aligned to agent accept/reject outcome
+            claim.Status = 'accepted' if decision == 'approve' else 'rejected'
+            if reason:
+                claim.Reason = reason
             claim.UpdatedAt = _now_utc()
             claim.save()
 
@@ -915,11 +988,20 @@ class SupervisorClaimDecisionView(APIView):
                 Action=f"supervisor_claim_{decision}",
                 TargetType="claim",
                 TargetID=str(claim.ClaimID),
-                Details={"reason": reason} if reason else None,
+                Details={
+                    "reason": reason,
+                    "managerApprovalStatus": claim.managerApprovalStatus,
+                    "managerNotes": getattr(claim, 'managerNotes', None),
+                },
                 CreatedAt=_now_utc(),
             ).save()
 
-            return Response({"ok": True, "newStatus": claim.Status}, status=status.HTTP_200_OK)
+            return Response({
+                "ok": True,
+                "newStatus": claim.Status,
+                "managerApprovalStatus": claim.managerApprovalStatus,
+                "managerNotes": getattr(claim, 'managerNotes', None),
+            }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1687,6 +1769,8 @@ class ClaimListCreateView(APIView):
                     "CustomerPlanID": getattr(c, "CustomerPlanID", None),
                     "AssignedToUserID": c.AssignedToUserID,
                     "Status": c.Status,
+                    "agentApprovalStatus": getattr(c, "agentApprovalStatus", None),
+                    "agentStatusNote": getattr(c, "agentStatusNote", None),
                     "Amount": c.Amount,
                     "Reason": c.Reason,
                     "ItemIDs": list(c.ItemIDs or []),

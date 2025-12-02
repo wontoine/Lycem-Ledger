@@ -14,6 +14,9 @@ function AgentHomePage() {
   // Interaction States
   const [selectedPolicy, setSelectedPolicy] = useState(null);
   const [processing, setProcessing] = useState(false);
+  // Per-claim action state
+  const [decisionNotes, setDecisionNotes] = useState({}); // { [claimId]: note }
+  const [decisionBusy, setDecisionBusy] = useState({}); // { [claimId]: boolean }
 
   // Create Policy Form State
   const [newPolicyForm, setNewPolicyForm] = useState({
@@ -138,6 +141,66 @@ function AgentHomePage() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedUserID]);
+
+  // --- Agent Claim Decision ---
+  const handleClaimDecision = async (claimId, decision) => {
+    if (!storedUserID) return;
+    const note = (decisionNotes?.[claimId] || "").trim();
+
+    setDecisionBusy((prev) => ({ ...prev, [claimId]: true }));
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/claims/${claimId}/decision/`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": String(storedUserID),
+          },
+          body: JSON.stringify({ decision, note }),
+        }
+      );
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("Decision failed", data);
+        alert(
+          `Failed to ${decision} claim #${claimId}: ` +
+            (data?.error || "Unknown error")
+        );
+        return;
+      }
+
+      // Update local state to reflect new decision without full refetch
+      setClaims((prev) =>
+        (prev || []).map((c) => {
+          if (c.ClaimID !== claimId) return c;
+          const newStatus = data?.newStatus || c.Status;
+          const agentApprovalStatus =
+            data?.agentApprovalStatus ||
+            (decision === "accept" ? "approved" : "rejected");
+          const agentStatusNote =
+            data?.agentStatusNote !== undefined
+              ? data.agentStatusNote
+              : note || c.agentStatusNote;
+          return {
+            ...c,
+            Status: newStatus,
+            agentApprovalStatus,
+            agentStatusNote,
+          };
+        })
+      );
+
+      // Clear note after success
+      setDecisionNotes((prev) => ({ ...prev, [claimId]: "" }));
+    } catch (err) {
+      console.error("Network error submitting decision", err);
+      alert("Network error submitting decision.");
+    } finally {
+      setDecisionBusy((prev) => ({ ...prev, [claimId]: false }));
+    }
+  };
 
   // --- REAL CREATE POLICY LOGIC ---
   const handleCreatePolicy = async (e) => {
@@ -361,12 +424,14 @@ function AgentHomePage() {
                 <th className="p-4">Reason</th>
                 <th className="p-4">Amount</th>
                 <th className="p-4">Status</th>
+                <th className="p-4">Agent Decision</th>
+                <th className="p-4">Action</th>
               </tr>
             </thead>
             <tbody>
               {claims.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="p-8 text-center text-gray-400">
+                  <td colSpan="7" className="p-8 text-center text-gray-400">
                     No active claims found.
                   </td>
                 </tr>
@@ -396,6 +461,67 @@ function AgentHomePage() {
                       >
                         {claim.Status}
                       </span>
+                    </td>
+                    {/* Agent decision info and controls */}
+                    <td className="p-4 align-top">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-semibold text-gray-700">
+                          {(() => {
+                            const s = (claim.agentApprovalStatus || "pending").toLowerCase();
+                            if (s === "approved") return "Approved";
+                            if (s === "rejected") return "Rejected";
+                            return "Pending";
+                          })()}
+                        </span>
+                        {claim.agentStatusNote ? (
+                          <span className="text-xs text-gray-500 italic">
+                            Note: {claim.agentStatusNote}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-col gap-2 min-w-[260px]">
+                        <input
+                          type="text"
+                          placeholder="Optional note (e.g. reason)"
+                          className="w-full p-2 border border-gray-300 rounded"
+                          value={decisionNotes?.[claim.ClaimID] || ""}
+                          onChange={(e) =>
+                            setDecisionNotes((prev) => ({
+                              ...prev,
+                              [claim.ClaimID]: e.target.value,
+                            }))
+                          }
+                          disabled={!!decisionBusy?.[claim.ClaimID]}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            className={`px-3 py-2 rounded text-white text-xs font-bold ${
+                              decisionBusy?.[claim.ClaimID]
+                                ? "bg-green-300 cursor-not-allowed"
+                                : "bg-green-600 hover:bg-green-700"
+                            }`}
+                            onClick={() => handleClaimDecision(claim.ClaimID, "accept")}
+                            disabled={!!decisionBusy?.[claim.ClaimID]}
+                            title="Approve this claim"
+                          >
+                            {decisionBusy?.[claim.ClaimID] ? "Working..." : "Approve"}
+                          </button>
+                          <button
+                            className={`px-3 py-2 rounded text-white text-xs font-bold ${
+                              decisionBusy?.[claim.ClaimID]
+                                ? "bg-red-300 cursor-not-allowed"
+                                : "bg-red-600 hover:bg-red-700"
+                            }`}
+                            onClick={() => handleClaimDecision(claim.ClaimID, "reject")}
+                            disabled={!!decisionBusy?.[claim.ClaimID]}
+                            title="Reject this claim"
+                          >
+                            {decisionBusy?.[claim.ClaimID] ? "Working..." : "Reject"}
+                          </button>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ))
