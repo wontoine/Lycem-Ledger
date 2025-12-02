@@ -435,7 +435,7 @@ function UserHomePage() {
   const storedUserID = localStorage.getItem("userID");
 
   const navItems = [
-    { name: "Policies", path: "/userHomePage" },
+    { name: "Policies", path: "/home" },
     { name: "Claims", path: "/claims" },
   ];
 

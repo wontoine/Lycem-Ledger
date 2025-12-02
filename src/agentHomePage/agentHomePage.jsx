@@ -31,7 +31,7 @@ function AgentHomePage() {
     price: "",
   });
 
-  // Defined Plans + The new Custom Option
+  // Defined Plans
   const availablePlans = [
     {
       planID: 1,
@@ -58,8 +58,8 @@ function AgentHomePage() {
       planID: 4,
       PlanName: "Customized Plan",
       Description: "Agent-defined coverage and pricing.",
-      CoverageLim: 0, // Placeholder, will be overwritten by input
-      BasePrice: 0, // Placeholder, will be overwritten by input
+      CoverageLim: 0,
+      BasePrice: 0,
     },
   ];
 
@@ -97,7 +97,6 @@ function AgentHomePage() {
         "x-user-id": String(storedUserID),
       };
 
-      // Fetch Policies and Claims in parallel
       const [policiesRes, claimsRes] = await Promise.all([
         fetch("http://127.0.0.1:8000/api/agent/policies/", { headers }).catch(
           (err) => ({ ok: false, error: err })
@@ -107,24 +106,20 @@ function AgentHomePage() {
         ),
       ]);
 
-      // Process Claims
       let claimsData = [];
       if (claimsRes.ok) {
         const resJson = await claimsRes.json();
         claimsData = resJson.claims || [];
       } else {
         console.warn("Failed to fetch claims.");
-        claimsData = [];
       }
 
-      // Process Policies
       let policiesData = [];
       if (policiesRes.ok) {
         const resJson = await policiesRes.json();
         policiesData = resJson.policies || [];
       } else {
-         console.warn("Failed to fetch policies.");
-         policiesData = [];
+        console.warn("Failed to fetch policies.");
       }
 
       setClaims(claimsData);
@@ -172,6 +167,7 @@ function AgentHomePage() {
       }
 
       // Update local state to reflect new decision without full refetch
+      // This will automatically move the claim from Pending to Past Claims
       setClaims((prev) =>
         (prev || []).map((c) => {
           if (c.ClaimID !== claimId) return c;
@@ -192,7 +188,6 @@ function AgentHomePage() {
         })
       );
 
-      // Clear note after success
       setDecisionNotes((prev) => ({ ...prev, [claimId]: "" }));
     } catch (err) {
       console.error("Network error submitting decision", err);
@@ -202,7 +197,6 @@ function AgentHomePage() {
     }
   };
 
-  // --- REAL CREATE POLICY LOGIC ---
   const handleCreatePolicy = async (e) => {
     e.preventDefault();
     setProcessing(true);
@@ -217,56 +211,51 @@ function AgentHomePage() {
       return;
     }
 
-    // Prepare payload matching AgentCreatePlanView in claims_views.py
     let payload = {
-      userID: parseInt(newPolicyForm.CustomerID), // The Customer's ID
+      userID: parseInt(newPolicyForm.CustomerID),
       planID: parseInt(selectedPlan.planID),
       PlanName: selectedPlan.PlanName,
-      status: "pending", // <--- CRITICAL FIX: Ensures policy is created as pending
+      status: "pending",
     };
 
-    // Handle Custom vs Standard Plan details
     if (Number(selectedPlan.planID) === 4) {
-      // Custom Plan: Use values from input fields
       payload.Description = customDetails.description;
       payload.CoverageLim = parseFloat(customDetails.coverage);
       payload.BasePrice = parseFloat(customDetails.price);
     } else {
-      // Standard Plan: Use values from availablePlans constant
       payload.Description = selectedPlan.Description;
       payload.CoverageLim = selectedPlan.CoverageLim;
       payload.BasePrice = selectedPlan.BasePrice;
     }
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/agent/create-plan/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-id": String(storedUserID),
-        },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/agent/create-plan/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": String(storedUserID),
+          },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const data = await response.json();
 
       if (response.ok) {
-        // Success
         alert(`Policy Created Successfully! ID: ${data.customerPlanID}`);
-
-        // Reset forms
         setNewPolicyForm({ CustomerID: "", PlanID: "" });
         setCustomDetails({ description: "", coverage: "", price: "" });
-
-        // Refresh data to show the new policy in the list
         await fetchData();
-
-        // Switch tab to view the list
         setActiveTab("policies");
       } else {
-        // Error from backend
         console.error("Creation failed:", data);
-        alert(`Error: ${data.error ? JSON.stringify(data.error) : "Failed to create policy"}`);
+        alert(
+          `Error: ${
+            data.error ? JSON.stringify(data.error) : "Failed to create policy"
+          }`
+        );
       }
     } catch (error) {
       console.error("Network error:", error);
@@ -277,7 +266,6 @@ function AgentHomePage() {
   };
 
   // --- Renderers ---
-
   const PolicyDetailsModal = ({ policy, onClose }) => {
     if (!policy) return null;
     return (
@@ -288,14 +276,10 @@ function AgentHomePage() {
               <h2 className="text-2xl font-bold">{policy.PlanName}</h2>
               <p className="text-blue-100">Policy #{policy.PolicyID}</p>
             </div>
-            <button
-              onClick={onClose}
-              className="text-white hover:text-blue-200 text-2xl"
-            >
+            <button onClick={onClose} className="text-white hover:text-blue-200 text-2xl">
               ×
             </button>
           </div>
-
           <div className="p-6 space-y-4">
             <div>
               <label className="text-xs font-bold text-gray-400 uppercase">
@@ -303,7 +287,6 @@ function AgentHomePage() {
               </label>
               <p className="text-gray-700">{policy.Description}</p>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gray-50 p-3 rounded-lg">
                 <label className="text-xs font-bold text-gray-400 uppercase">
@@ -317,7 +300,8 @@ function AgentHomePage() {
                 </label>
                 <p
                   className={`font-bold ${
-                    (policy.Status || "").toLowerCase() === "active" || (policy.Status || "").toLowerCase() === "approved"
+                    (policy.Status || "").toLowerCase() === "active" ||
+                    (policy.Status || "").toLowerCase() === "approved"
                       ? "text-green-600"
                       : "text-yellow-600"
                   }`}
@@ -342,15 +326,7 @@ function AgentHomePage() {
                 </p>
               </div>
             </div>
-
-            <div className="border-t pt-4 mt-2">
-              <label className="text-xs font-bold text-gray-400 uppercase">
-                Start Date
-              </label>
-              <p className="text-gray-700">{policy.StartDate}</p>
-            </div>
           </div>
-
           <div className="p-4 bg-gray-50 text-right">
             <button
               onClick={onClose}
@@ -387,7 +363,8 @@ function AgentHomePage() {
                 </h3>
                 <span
                   className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                    (policy.Status || "").toLowerCase() === "active" || (policy.Status || "").toLowerCase() === "approved"
+                    (policy.Status || "").toLowerCase() === "active" ||
+                    (policy.Status || "").toLowerCase() === "approved"
                       ? "bg-green-100 text-green-700"
                       : "bg-yellow-100 text-yellow-700"
                   }`}
@@ -411,131 +388,220 @@ function AgentHomePage() {
     </div>
   );
 
-  const renderClaimsTab = () => (
-    <div className="max-w-6xl mx-auto">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Active Claims</h2>
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-600">
-            <thead className="bg-gray-100 uppercase text-gray-500 font-bold">
-              <tr>
-                <th className="p-4">Claim ID</th>
-                <th className="p-4">Policy ID</th>
-                <th className="p-4">Reason</th>
-                <th className="p-4">Amount</th>
-                <th className="p-4">Status</th>
-                <th className="p-4">Agent Decision</th>
-                <th className="p-4">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {claims.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-gray-400">
-                    No active claims found.
-                  </td>
-                </tr>
-              ) : (
-                claims.map((claim) => (
-                  <tr
-                    key={claim.ClaimID}
-                    className="border-b hover:bg-gray-50 transition"
-                  >
-                    <td className="p-4 font-mono font-bold text-gray-700">
-                      #{claim.ClaimID}
-                    </td>
-                    <td className="p-4 font-mono">{claim.PolicyID || claim.CustomerPlanID}</td>
-                    <td className="p-4">{claim.Reason}</td>
-                    <td className="p-4 font-semibold text-gray-800">
-                      ${claim.Amount?.toLocaleString()}
-                    </td>
-                    <td className="p-4">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                          claim.Status === "submitted"
-                            ? "bg-blue-100 text-blue-800"
-                            : claim.Status === "accepted" || claim.Status === "approved"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        {claim.Status}
-                      </span>
-                    </td>
-                    {/* Agent decision info and controls */}
-                    <td className="p-4 align-top">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs font-semibold text-gray-700">
-                          {(() => {
-                            const s = (claim.agentApprovalStatus || "pending").toLowerCase();
-                            if (s === "approved") return "Approved";
-                            if (s === "rejected") return "Rejected";
-                            return "Pending";
-                          })()}
-                        </span>
-                        {claim.agentStatusNote ? (
-                          <span className="text-xs text-gray-500 italic">
-                            Note: {claim.agentStatusNote}
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex flex-col gap-2 min-w-[260px]">
-                        <input
-                          type="text"
-                          placeholder="Optional note (e.g. reason)"
-                          className="w-full p-2 border border-gray-300 rounded"
-                          value={decisionNotes?.[claim.ClaimID] || ""}
-                          onChange={(e) =>
-                            setDecisionNotes((prev) => ({
-                              ...prev,
-                              [claim.ClaimID]: e.target.value,
-                            }))
-                          }
-                          disabled={!!decisionBusy?.[claim.ClaimID]}
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            className={`px-3 py-2 rounded text-white text-xs font-bold ${
-                              decisionBusy?.[claim.ClaimID]
-                                ? "bg-green-300 cursor-not-allowed"
-                                : "bg-green-600 hover:bg-green-700"
-                            }`}
-                            onClick={() => handleClaimDecision(claim.ClaimID, "accept")}
-                            disabled={!!decisionBusy?.[claim.ClaimID]}
-                            title="Approve this claim"
-                          >
-                            {decisionBusy?.[claim.ClaimID] ? "Working..." : "Approve"}
-                          </button>
-                          <button
-                            className={`px-3 py-2 rounded text-white text-xs font-bold ${
-                              decisionBusy?.[claim.ClaimID]
-                                ? "bg-red-300 cursor-not-allowed"
-                                : "bg-red-600 hover:bg-red-700"
-                            }`}
-                            onClick={() => handleClaimDecision(claim.ClaimID, "reject")}
-                            disabled={!!decisionBusy?.[claim.ClaimID]}
-                            title="Reject this claim"
-                          >
-                            {decisionBusy?.[claim.ClaimID] ? "Working..." : "Reject"}
-                          </button>
-                        </div>
-                      </div>
-                    </td>
+  const renderClaimsTab = () => {
+    // 1. Separate claims into Pending vs Past based on agentApprovalStatus
+    const pendingClaims = claims.filter(
+      (c) =>
+        !c.agentApprovalStatus ||
+        c.agentApprovalStatus.toLowerCase() === "pending"
+    );
+
+    const pastClaims = claims.filter(
+      (c) =>
+        c.agentApprovalStatus &&
+        c.agentApprovalStatus.toLowerCase() !== "pending"
+    );
+
+    return (
+      <div className="max-w-6xl mx-auto space-y-12">
+        {/* Section 1: Claims to be Approved (Pending) */}
+        <section>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <span>📝</span> Pending Reviews
+            <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full">
+              {pendingClaims.length}
+            </span>
+          </h2>
+
+          <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-600">
+                <thead className="bg-gray-100 uppercase text-gray-500 font-bold">
+                  <tr>
+                    <th className="p-4">Claim ID</th>
+                    <th className="p-4">Policy / Plan</th>
+                    <th className="p-4">Reason</th>
+                    <th className="p-4">Amount</th>
+                    <th className="p-4">Action</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {pendingClaims.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="p-8 text-center text-gray-400">
+                        No claims waiting for review. Good job!
+                      </td>
+                    </tr>
+                  ) : (
+                    pendingClaims.map((claim) => (
+                      <tr
+                        key={claim.ClaimID}
+                        className="border-b hover:bg-gray-50 transition"
+                      >
+                        <td className="p-4 font-mono font-bold text-gray-700">
+                          #{claim.ClaimID}
+                        </td>
+                        <td className="p-4 font-mono">
+                          {claim.CustomerPlanID || claim.PolicyID}
+                        </td>
+                        <td className="p-4 max-w-xs truncate">{claim.Reason}</td>
+                        <td className="p-4 font-semibold text-gray-800">
+                          ${claim.Amount?.toLocaleString()}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-col gap-2 min-w-[220px]">
+                            <input
+                              type="text"
+                              placeholder="Reason / Note (Optional)"
+                              className="w-full p-2 border border-gray-300 rounded text-xs"
+                              value={decisionNotes?.[claim.ClaimID] || ""}
+                              onChange={(e) =>
+                                setDecisionNotes((prev) => ({
+                                  ...prev,
+                                  [claim.ClaimID]: e.target.value,
+                                }))
+                              }
+                              disabled={!!decisionBusy?.[claim.ClaimID]}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                className={`flex-1 py-1.5 rounded text-white text-xs font-bold shadow-sm transition ${
+                                  decisionBusy?.[claim.ClaimID]
+                                    ? "bg-green-300 cursor-not-allowed"
+                                    : "bg-green-600 hover:bg-green-700"
+                                }`}
+                                onClick={() =>
+                                  handleClaimDecision(claim.ClaimID, "accept")
+                                }
+                                disabled={!!decisionBusy?.[claim.ClaimID]}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                className={`flex-1 py-1.5 rounded text-white text-xs font-bold shadow-sm transition ${
+                                  decisionBusy?.[claim.ClaimID]
+                                    ? "bg-red-300 cursor-not-allowed"
+                                    : "bg-red-600 hover:bg-red-700"
+                                }`}
+                                onClick={() =>
+                                  handleClaimDecision(claim.ClaimID, "reject")
+                                }
+                                disabled={!!decisionBusy?.[claim.ClaimID]}
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 2: Past Claims (History) */}
+        <section>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <span>🗄️</span> Past Claims
+            <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full">
+              {pastClaims.length}
+            </span>
+          </h2>
+
+          <div className="bg-gray-50 rounded-xl shadow-inner border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-600">
+                <thead className="bg-gray-200 uppercase text-gray-600 font-bold">
+                  <tr>
+                    <th className="p-4">Claim ID</th>
+                    <th className="p-4">Plan ID</th>
+                    <th className="p-4">Reason</th>
+                    <th className="p-4">Amount</th>
+                    <th className="p-4">Agent Decision</th>
+                    <th className="p-4">Manager Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pastClaims.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="p-8 text-center text-gray-400">
+                        No history available.
+                      </td>
+                    </tr>
+                  ) : (
+                    pastClaims.map((claim) => (
+                      <tr
+                        key={claim.ClaimID}
+                        className="border-b border-gray-200 hover:bg-white transition"
+                      >
+                        <td className="p-4 font-mono font-bold text-gray-600">
+                          #{claim.ClaimID}
+                        </td>
+                        <td className="p-4 font-mono">
+                          {claim.CustomerPlanID || claim.PolicyID}
+                        </td>
+                        <td className="p-4 max-w-xs truncate">{claim.Reason}</td>
+                        <td className="p-4 text-gray-800">
+                          ${claim.Amount?.toLocaleString()}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-col">
+                            <span
+                              className={`text-xs font-bold uppercase ${
+                                (claim.agentApprovalStatus || "").toLowerCase() ===
+                                "approved"
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {claim.agentApprovalStatus || "Unknown"}
+                            </span>
+                            {claim.agentStatusNote && (
+                              <span className="text-[10px] text-gray-400 italic truncate max-w-[150px]">
+                                {claim.agentStatusNote}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-bold uppercase ${
+                              (claim.managerApprovalStatus || "").toLowerCase() ===
+                              "approved"
+                                ? "bg-green-100 text-green-700"
+                                : (claim.managerApprovalStatus || "").toLowerCase() ===
+                                  "rejected"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
+                            {/* Fallback to overall status if manager status is missing,
+                                but explicit managerApprovalStatus is preferred */}
+                            {claim.managerApprovalStatus ||
+                              (claim.Status === "accepted"
+                                ? "Approved"
+                                : claim.Status === "rejected"
+                                ? "Rejected"
+                                : "Pending")}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderCreateTab = () => {
     const isCustomPlan = Number(newPolicyForm.PlanID) === 4;
-    // Validation logic: Check regular fields + custom fields if custom is selected
     const isValid =
       newPolicyForm.PlanID &&
       newPolicyForm.CustomerID &&
@@ -551,7 +617,6 @@ function AgentHomePage() {
         </h2>
         <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-200">
           <form onSubmit={handleCreatePolicy} className="space-y-6">
-            {/* Customer ID Input */}
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
                 Customer ID
@@ -570,8 +635,6 @@ function AgentHomePage() {
                 }
               />
             </div>
-
-            {/* Plan Selection */}
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
                 Select Plan
@@ -620,13 +683,11 @@ function AgentHomePage() {
               </div>
             </div>
 
-            {/* CONDITIONAL INPUTS FOR CUSTOM PLAN */}
             {isCustomPlan && (
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-4 animate-fade-in">
                 <h4 className="text-sm font-bold text-blue-800 border-b border-blue-200 pb-2">
                   Custom Plan Details
                 </h4>
-
                 <div>
                   <label className="block text-xs font-semibold text-blue-700 mb-1">
                     Description
@@ -645,7 +706,6 @@ function AgentHomePage() {
                     }
                   />
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-blue-700 mb-1">
@@ -704,10 +764,8 @@ function AgentHomePage() {
     );
   };
 
-  // --- Main Layout ---
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
-      {/* Sidebar */}
       <div
         className={`fixed inset-y-0 left-0 bg-white w-64 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -724,7 +782,6 @@ function AgentHomePage() {
             ✕
           </button>
         </div>
-
         <nav className="p-4 space-y-2">
           {navItems.map((item) => (
             <button
@@ -746,7 +803,6 @@ function AgentHomePage() {
             </button>
           ))}
         </nav>
-
         <div className="absolute bottom-6 left-0 w-full px-6">
           <button
             onClick={handleSignOut}
@@ -757,7 +813,6 @@ function AgentHomePage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm z-30 p-4 flex items-center justify-between lg:justify-end">
           <button
@@ -766,7 +821,6 @@ function AgentHomePage() {
           >
             ☰
           </button>
-
           <div className="flex items-center gap-6 mr-auto lg:mr-0 lg:ml-auto">
             <button
               onClick={fetchData}
@@ -774,7 +828,6 @@ function AgentHomePage() {
             >
               ↻ Refresh Data
             </button>
-
             <div className="flex items-center gap-3 py-1 px-3 bg-gray-50 rounded-xl border border-gray-200">
               <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold border border-blue-200 text-sm">
                 A
@@ -803,7 +856,6 @@ function AgentHomePage() {
               </button>
             </div>
           )}
-
           {loading ? (
             <div className="flex justify-center items-center h-64 flex-col gap-4 text-gray-400">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -819,7 +871,6 @@ function AgentHomePage() {
         </div>
       </main>
 
-      {/* Details Modal */}
       {selectedPolicy && (
         <PolicyDetailsModal
           policy={selectedPolicy}

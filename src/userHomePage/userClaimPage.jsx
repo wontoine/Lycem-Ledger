@@ -1,17 +1,223 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
+// --- Helper: Status Badge Component ---
+const StatusBadge = ({ status }) => {
+  const s = (status || "").toLowerCase();
+  let colorClass = "bg-blue-100 text-blue-700"; // default/submitted
+
+  if (s === "accepted" || s === "approved") {
+    colorClass = "bg-green-100 text-green-700";
+  } else if (s === "rejected" || s === "denied") {
+    colorClass = "bg-red-100 text-red-700";
+  } else if (s === "pending" || s === "in_review") {
+    colorClass = "bg-yellow-100 text-yellow-700";
+  }
+
+  return (
+    <span
+      className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${colorClass}`}
+    >
+      {status || "Unknown"}
+    </span>
+  );
+};
+
+// --- Helper: Date Formatter ---
+const formatDate = (dateString) => {
+  if (!dateString) return "N/A";
+  return new Date(dateString).toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+// --- Component: Claim Details Modal ---
+const ClaimDetailsModal = ({ claim, onClose }) => {
+  if (!claim) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="bg-blue-600 p-6 flex justify-between items-start text-white shrink-0">
+          <div>
+            <h2 className="text-2xl font-bold">Claim Details</h2>
+            <p className="text-blue-100 text-sm font-mono mt-1">
+              ID: {claim.ClaimID}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white hover:text-blue-200 text-3xl font-light leading-none"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="p-6 overflow-y-auto space-y-6">
+          {/* Top Row: Key Info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <label className="text-xs font-bold text-gray-400 uppercase">
+                Current Status
+              </label>
+              <div className="mt-1">
+                <StatusBadge status={claim.Status} />
+              </div>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <label className="text-xs font-bold text-gray-400 uppercase">
+                Claim Amount
+              </label>
+              <p className="text-xl font-bold text-gray-800">
+                ${(claim.Amount || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          {/* Policy & IDs */}
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase">
+                Customer Plan ID
+              </label>
+              <span className="font-mono text-blue-600 font-bold">
+                {claim.CustomerPlanID || "N/A"}
+              </span>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase">
+                Policy ID
+              </label>
+              <span className="font-mono text-gray-700">
+                {claim.PolicyID || "N/A"}
+              </span>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase">
+                Customer ID
+              </label>
+              <span className="font-mono text-gray-700">
+                {claim.CustomerID || "N/A"}
+              </span>
+            </div>
+          </div>
+
+          {/* Reason */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+              Reason for Claim
+            </label>
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-gray-700 italic">
+              "{claim.Reason}"
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-bold text-gray-800 mb-3">Timeline</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-gray-500">Filed On:</span>
+                <p className="font-medium">{formatDate(claim.CreatedAt)}</p>
+              </div>
+              <div>
+                <span className="text-gray-500">Last Updated:</span>
+                <p className="font-medium">{formatDate(claim.UpdatedAt)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Approval Workflow Details */}
+          {(claim.agentApprovalStatus || claim.managerApprovalStatus) && (
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-bold text-gray-800 mb-3">
+                Review Details
+              </h3>
+              <div className="space-y-3">
+                {/* Agent Review */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
+                  <div className="min-w-[4rem] font-bold text-xs text-blue-800 uppercase mt-1">
+                    Agent
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-bold text-gray-900">
+                        Decision:
+                      </span>
+                      <StatusBadge status={claim.agentApprovalStatus || "Pending"} />
+                    </div>
+                    {claim.agentStatusNote && (
+                      <p className="text-sm text-gray-600">
+                        <span className="font-semibold">Note:</span>{" "}
+                        {claim.agentStatusNote}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Manager Review */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-purple-50 border border-purple-100">
+                  <div className="min-w-[4rem] font-bold text-xs text-purple-800 uppercase mt-1">
+                    Manager
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-bold text-gray-900">
+                        Decision:
+                      </span>
+                      <StatusBadge status={claim.managerApprovalStatus || "Pending"} />
+                    </div>
+                    {claim.managerApprovedAt && (
+                      <div className="text-xs text-gray-500 mb-1">
+                        Review Date: {formatDate(claim.managerApprovedAt)}
+                      </div>
+                    )}
+                    {claim.managerNotes && (
+                      <p className="text-sm text-gray-600">
+                        <span className="font-semibold">Note:</span>{" "}
+                        {claim.managerNotes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 bg-gray-50 border-t flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Main Page Component ---
 function UserClaimsPage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedClaim, setSelectedClaim] = useState(null);
 
   const navigate = useNavigate();
   const storedUserID = localStorage.getItem("userID");
 
   const navItems = [
-    { name: "Policies", path: "/userHomePage" },
+    { name: "Policies", path: "/home" },
     { name: "Claims", path: "/claims" },
   ];
 
@@ -30,12 +236,10 @@ function UserClaimsPage() {
       setLoading(true);
       setError(null);
       try {
-        // Use the ClaimListCreateView endpoint defined in urls.py
         const response = await fetch("http://127.0.0.1:8000/api/claims/", {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            // The backend requires x-user-id to filter claims for this specific customer
             "x-user-id": storedUserID,
           },
         });
@@ -45,7 +249,6 @@ function UserClaimsPage() {
         }
 
         const data = await response.json();
-        // The API returns { "claims": [...] }
         setClaims(data.claims || []);
       } catch (err) {
         console.error("Error fetching claims:", err);
@@ -58,16 +261,8 @@ function UserClaimsPage() {
     fetchClaims();
   }, [storedUserID, navigate]);
 
-  // Helper to normalize status for badge coloring
-  const getStatusColor = (status) => {
-    const s = (status || "").toLowerCase();
-    if (s === "accepted" || s === "approved") return "bg-green-100 text-green-700";
-    if (s === "rejected" || s === "denied") return "bg-red-100 text-red-700";
-    return "bg-blue-100 text-blue-700"; // submitted/pending
-  };
-
   return (
-    <div className="flex bg-gray-100 min-h-screen">
+    <div className="flex bg-gray-100 min-h-screen font-sans">
       {/* Sidebar */}
       <div
         className={`fixed bg-white w-64 h-screen shadow-2xl transition-transform duration-300 ease-in-out z-40 flex flex-col ${
@@ -167,10 +362,11 @@ function UserClaimsPage() {
                   <thead className="bg-gray-50 text-gray-700 font-bold uppercase">
                     <tr>
                       <th className="p-4">Claim ID</th>
-                      <th className="p-4">Policy / Plan ID</th>
+                      <th className="p-4">Date Filed</th>
                       <th className="p-4">Reason</th>
                       <th className="p-4 text-right">Amount</th>
                       <th className="p-4 text-center">Status</th>
+                      <th className="p-4 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -182,24 +378,25 @@ function UserClaimsPage() {
                         <td className="p-4 font-mono font-bold text-gray-800">
                           #{claim.ClaimID}
                         </td>
-                        <td className="p-4 font-mono text-blue-600">
-                          {/* Display CustomerPlanID, fallback to PolicyID */}
-                          {claim.CustomerPlanID || claim.PolicyID || "N/A"}
+                        <td className="p-4 text-gray-600">
+                          {new Date(claim.CreatedAt).toLocaleDateString()}
                         </td>
-                        <td className="p-4 font-medium text-gray-800">
+                        <td className="p-4 font-medium text-gray-800 truncate max-w-xs">
                           {claim.Reason}
                         </td>
                         <td className="p-4 text-gray-600 text-right font-mono">
                           ${(claim.Amount || 0).toLocaleString()}
                         </td>
                         <td className="p-4 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${getStatusColor(
-                              claim.Status
-                            )}`}
+                          <StatusBadge status={claim.Status} />
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => setSelectedClaim(claim)}
+                            className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-blue-700 shadow transition"
                           >
-                            {claim.Status}
-                          </span>
+                            View
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -210,6 +407,14 @@ function UserClaimsPage() {
           )}
         </div>
       </main>
+
+      {/* Claim Details Modal */}
+      {selectedClaim && (
+        <ClaimDetailsModal
+          claim={selectedClaim}
+          onClose={() => setSelectedClaim(null)}
+        />
+      )}
     </div>
   );
 }
