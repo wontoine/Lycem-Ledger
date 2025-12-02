@@ -259,7 +259,6 @@ class AgentClaimsDashboard(APIView):
             except Exception:
                 pass
 
-            # --- CORRECTION START ---
             # Build query to find plans assigned to either the AgentID OR the UserID
             query_filter = [
                 {"assignedAgentID": user.userid},
@@ -280,7 +279,6 @@ class AgentClaimsDashboard(APIView):
                 assigned_plans = CustomerPlan.objects(__raw__={"$or": query_filter})
             except Exception:
                 assigned_plans = []
-            # --- CORRECTION END ---
 
             # Prefer linking via CustomerPlanID instead of CustomerID
             plan_ids = set()
@@ -372,6 +370,7 @@ class AgentClaimsDashboard(APIView):
                     "ItemIDs": list(getattr(c, "ItemIDs", []) or []),
                     "CreatedAt": getattr(c, "CreatedAt", None),
                     "UpdatedAt": getattr(c, "UpdatedAt", None),
+                    "managerApprovalStatus": getattr(c, "managerApprovalStatus", None),
                 }
                 for c in claims
             ]
@@ -419,7 +418,6 @@ class AgentPoliciesView(APIView):
             except Exception:
                 pass
 
-            # --- CORRECTION START ---
             # Search for plans assigned to either UserID OR AgentID
             query_filter = [
                 {"assignedAgentID": user.userid},
@@ -440,8 +438,6 @@ class AgentPoliciesView(APIView):
                 assigned_plans = CustomerPlan.objects(__raw__={"$or": query_filter})
             except Exception:
                 assigned_plans = []
-
-            # --- CORRECTION END ---
 
             def _get(cp, *names, default=None):
                 for n in names:
@@ -862,6 +858,7 @@ class ClaimDecisionView(APIView):
 class SupervisorClaimsReviewList(APIView):
     """
     List for Managers to review claims that Agents have already 'accepted'.
+    Returns ALL agent-approved claims (Pending + Past History).
     """
 
     def get(self, request):
@@ -922,7 +919,6 @@ class SupervisorClaimsReviewList(APIView):
             team_plan_ids = set()
             team_customer_ids = set()
 
-            # --- FIX: Include Customers directly linked to the Team via TeamID ---
             if team_id is not None:
                 try:
                     # Find customers strictly by TeamID (even if not assigned to specific agent)
@@ -936,7 +932,6 @@ class SupervisorClaimsReviewList(APIView):
                             pass
                 except Exception:
                     pass
-            # --- FIX END ---
 
             if team_agent_ids:
                 # Find customer plans whose assignedAgentID matches these AgentIDs
@@ -978,13 +973,6 @@ class SupervisorClaimsReviewList(APIView):
                     except Exception:
                         pass
 
-            # Core constraints for manager review: agent approved AND manager pending
-            manager_pending_expr = {"$or": [
-                {"managerApprovalStatus": {"$exists": False}},
-                {"managerApprovalStatus": None},
-                {"managerApprovalStatus": "pending"},
-            ]}
-
             # Linkage options that tie the claim to the manager's team
             linkage_or = []
             if team_agent_user_ids:
@@ -997,14 +985,17 @@ class SupervisorClaimsReviewList(APIView):
                 linkage_or.append({"CustomerID": {"$in": list(team_customer_ids)}})
                 linkage_or.append({"CustomerID": {"$in": [str(x) for x in team_customer_ids]}})
 
+            # Filter: Return all claims approved by agent (Pending + Past)
             raw_query = {
-                "$and": [
-                    {"agentApprovalStatus": "approved"},
-                    manager_pending_expr,
-                ]
+                "agentApprovalStatus": "approved"
             }
             if linkage_or:
-                raw_query["$and"].append({"$or": linkage_or})
+                raw_query = {
+                    "$and": [
+                        {"agentApprovalStatus": "approved"},
+                        {"$or": linkage_or}
+                    ]
+                }
 
             claims = Claim.objects(__raw__=raw_query)
 
