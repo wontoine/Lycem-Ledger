@@ -871,8 +871,8 @@ class SupervisorClaimsReviewList(APIView):
         if not (_is_manager(user) or _is_admin(user)):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         try:
-            # Determine manager's team agent user IDs (if available)
-            team_agent_user_ids = []
+            # Determine manager's team (TeamID)
+            team_id = None
             try:
                 sup = Supervisor.objects(UserID=user.userid).first()
                 if not sup:
@@ -881,41 +881,130 @@ class SupervisorClaimsReviewList(APIView):
                         {"userID": user.userid},
                     ]}).first()
                 team_id = getattr(sup, 'TeamID', None) if sup else None
-                if team_id is not None:
-                    try:
-                        team_agents = list(Agent.objects(__raw__={"$or": [
-                            {"TeamID": team_id},
-                            {"teamID": team_id},
-                        ]}))
-                    except Exception:
-                        team_agents = []
-                    # collect agent userIDs with multiple casing fallbacks
-                    for a in team_agents:
-                        uid = None
-                        try:
-                            uid = getattr(a, 'UserID', None)
-                        except Exception:
-                            uid = None
-                        if uid is None and hasattr(a, '_data'):
-                            uid = a._data.get('UserID') or a._data.get('userID')
-                        if uid is not None:
-                            team_agent_user_ids.append(uid)
             except Exception:
-                team_agent_user_ids = []
+                team_id = None
 
-            # Filter claims needing manager decision:
-            # - agentApprovalStatus == 'approved'
-            # - managerApprovalStatus missing/None/'pending'
-            raw_query = {
-                "agentApprovalStatus": "approved",
-                "$or": [
-                    {"managerApprovalStatus": {"$exists": False}},
-                    {"managerApprovalStatus": None},
-                    {"managerApprovalStatus": "pending"},
-                ],
-            }
+            # Collect agent identifiers on this team
+            team_agent_user_ids = []  # agent UserIDs
+            team_agent_ids = []       # AgentIDs
+            if team_id is not None:
+                try:
+                    team_agents = list(Agent.objects(__raw__={"$or": [
+                        {"TeamID": team_id},
+                        {"teamID": team_id},
+                    ]}))
+                except Exception:
+                    team_agents = []
+                for a in team_agents:
+                    # UserID (db_field=userID)
+                    uid = None
+                    try:
+                        uid = getattr(a, 'UserID', None)
+                    except Exception:
+                        uid = None
+                    if uid is None and hasattr(a, '_data'):
+                        uid = a._data.get('UserID') or a._data.get('userID')
+                    if uid is not None:
+                        team_agent_user_ids.append(uid)
+
+                    # AgentID (could be AgentID or agentID)
+                    aid = None
+                    try:
+                        aid = getattr(a, 'AgentID', None)
+                    except Exception:
+                        aid = None
+                    if aid is None and hasattr(a, '_data'):
+                        aid = a._data.get('AgentID') or a._data.get('agentID')
+                    if aid is not None:
+                        team_agent_ids.append(aid)
+
+            # Build sets of relevant CustomerPlanIDs and CustomerIDs under this team
+            team_plan_ids = set()
+            team_customer_ids = set()
+
+            # --- FIX: Include Customers directly linked to the Team via TeamID ---
+            if team_id is not None:
+                try:
+                    # Find customers strictly by TeamID (even if not assigned to specific agent)
+                    team_direct_customers = Customer.objects(__raw__={"TeamID": team_id})
+                    for cust in team_direct_customers:
+                        try:
+                            cid = getattr(cust, 'CustomerID', None) or (hasattr(cust, '_data') and cust._data.get('CustomerID'))
+                            if cid is not None:
+                                team_customer_ids.add(int(cid))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            # --- FIX END ---
+
+            if team_agent_ids:
+                # Find customer plans whose assignedAgentID matches these AgentIDs
+                try:
+                    cp_list = list(CustomerPlan.objects(__raw__={"$or": [
+                        {"assignedAgentID": {"$in": team_agent_ids}},
+                        {"assignedAgentID": {"$in": [str(x) for x in team_agent_ids]}},
+                    ]}))
+                except Exception:
+                    cp_list = []
+                for cp in cp_list:
+                    try:
+                        cpid = getattr(cp, 'CustomerPlanID', None) or (hasattr(cp, '_data') and cp._data.get('CustomerPlanID'))
+                        if cpid is not None:
+                            team_plan_ids.add(int(cpid))
+                    except Exception:
+                        pass
+                    try:
+                        cid = getattr(cp, 'CustomerID', None) or (hasattr(cp, '_data') and cp._data.get('CustomerID'))
+                        if cid is not None:
+                            team_customer_ids.add(int(cid))
+                    except Exception:
+                        pass
+
             if team_agent_user_ids:
-                raw_query["AssignedToUserID"] = {"$in": team_agent_user_ids}
+                # Also include customers explicitly assigned to any of the team agent userIDs
+                try:
+                    cust_list = list(Customer.objects(__raw__={"$or": [
+                        {"AssignedAgentUserID": {"$in": team_agent_user_ids}},
+                        {"AssignedAgentUserID": {"$in": [str(x) for x in team_agent_user_ids]}},
+                    ]}))
+                except Exception:
+                    cust_list = []
+                for cust in cust_list:
+                    try:
+                        cid = getattr(cust, 'CustomerID', None) or (hasattr(cust, '_data') and cust._data.get('CustomerID'))
+                        if cid is not None:
+                            team_customer_ids.add(int(cid))
+                    except Exception:
+                        pass
+
+            # Core constraints for manager review: agent approved AND manager pending
+            manager_pending_expr = {"$or": [
+                {"managerApprovalStatus": {"$exists": False}},
+                {"managerApprovalStatus": None},
+                {"managerApprovalStatus": "pending"},
+            ]}
+
+            # Linkage options that tie the claim to the manager's team
+            linkage_or = []
+            if team_agent_user_ids:
+                linkage_or.append({"AssignedToUserID": {"$in": team_agent_user_ids}})
+                linkage_or.append({"AssignedToUserID": {"$in": [str(x) for x in team_agent_user_ids]}})
+            if team_plan_ids:
+                linkage_or.append({"CustomerPlanID": {"$in": list(team_plan_ids)}})
+                linkage_or.append({"CustomerPlanID": {"$in": [str(x) for x in team_plan_ids]}})
+            if team_customer_ids:
+                linkage_or.append({"CustomerID": {"$in": list(team_customer_ids)}})
+                linkage_or.append({"CustomerID": {"$in": [str(x) for x in team_customer_ids]}})
+
+            raw_query = {
+                "$and": [
+                    {"agentApprovalStatus": "approved"},
+                    manager_pending_expr,
+                ]
+            }
+            if linkage_or:
+                raw_query["$and"].append({"$or": linkage_or})
 
             claims = Claim.objects(__raw__=raw_query)
 
