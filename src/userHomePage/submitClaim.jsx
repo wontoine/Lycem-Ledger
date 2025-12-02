@@ -1,11 +1,24 @@
 import React, { useState } from "react";
 
-// 1. Updated Props to accept 'selectedPolicy' object
 function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
-  // 2. Initialize state with selectedPolicy data if available
+  // Resolve customerPlanID from various possible shapes
+  const resolvedCustomerPlanID = selectedPolicy
+    ? (
+        selectedPolicy.customerPlanID ||
+        selectedPolicy.CustomerPlanID ||
+        selectedPolicy.policy_id ||
+        selectedPolicy.PolicyID ||
+        selectedPolicy.planID ||
+        selectedPolicy.planId ||
+        ""
+      )
+    : "";
+
   const [claimData, setClaimData] = useState({
+    // We keep this for display, but won't send it as 'customer_id' to backend
+    // to avoid confusing UserID (e.g. 55) with CustomerID (e.g. 1001)
     CustomerID: userID,
-    PolicyID: selectedPolicy ? selectedPolicy.policy_id : "",
+    CustomerPlanID: resolvedCustomerPlanID,
     Amount: "",
     Reason: "",
   });
@@ -26,21 +39,24 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
     setIsSubmitting(true);
     setError(null);
 
+    // Prepare payload
+    // Note: We intentionally omit 'customer_id' here. The backend's ClaimListCreateView
+    // will automatically look up the correct CustomerID for this user via the x-user-id header.
     const payload = {
-      customer_id: claimData.CustomerID,
-      policy_id: claimData.PolicyID,
+      customerPlanID: claimData.CustomerPlanID,
       amount: parseFloat(claimData.Amount),
       reason: claimData.Reason,
     };
 
-    const API_URL = "http://127.0.0.1:8000/auth/claims/submit/";
+    // Corrected URL matching urls.py path("api/claims/", ...)
+    const API_URL = "http://127.0.0.1:8000/api/claims/";
 
     try {
       const response = await fetch(API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-id": String(claimData.CustomerID),
+          "x-user-id": String(userID), // Authenticate as the logged-in UserID
         },
         body: JSON.stringify(payload),
       });
@@ -57,7 +73,9 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
 
       const result = await response.json();
       console.log("Claim submitted successfully:", result);
-      alert(`Claim #${result.ClaimID} submitted successfully!`);
+
+      const rid = result.claimID || result.ClaimID || "(unknown)";
+      alert(`Claim #${rid} submitted successfully!`);
       onClose();
     } catch (err) {
       console.error("Error submitting claim:", err.message);
@@ -86,10 +104,12 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
             <p className="font-bold text-sm uppercase tracking-wide text-blue-600">
               Selected Policy
             </p>
-            <p className="font-bold text-lg">{selectedPolicy.policy_name}</p>
+            <p className="font-bold text-lg">
+              {selectedPolicy.policy_name || selectedPolicy.PlanName || "Unnamed Policy"}
+            </p>
             <p className="text-sm opacity-80">
               Coverage Limit: $
-              {selectedPolicy.coverage_amount?.toLocaleString()}
+              {(selectedPolicy.coverage_amount || selectedPolicy.CoverageLim || 0).toLocaleString()}
             </p>
           </div>
         )}
@@ -103,9 +123,12 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-4">
+            {/* Displaying UserID here labeled as Customer ID.
+               Note: To the backend, UserID != CustomerID, but for UI simplicity we just show the logged-in ID.
+            */}
             <div className="flex items-center justify-between bg-gray-50 p-3 rounded-md border border-gray-200">
               <label className="text-sm font-medium text-gray-700">
-                Customer ID
+                User ID
               </label>
               <span className="text-sm font-mono font-bold text-gray-600">
                 {claimData.CustomerID}
@@ -114,16 +137,16 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
 
             <div>
               <label
-                htmlFor="PolicyID"
+                htmlFor="CustomerPlanID"
                 className="block text-sm font-medium text-gray-700"
               >
-                Policy ID <span className="text-red-500">*</span>
+                Customer Plan ID <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
-                name="PolicyID"
-                id="PolicyID"
-                value={claimData.PolicyID}
+                name="CustomerPlanID"
+                id="CustomerPlanID"
+                value={claimData.CustomerPlanID}
                 onChange={handleChange}
                 required
                 readOnly={!!selectedPolicy}
@@ -133,7 +156,7 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
                     ? "bg-gray-100 text-gray-500 border-gray-300 cursor-not-allowed"
                     : "border-gray-300"
                 }`}
-                placeholder="e.g., 9001"
+                placeholder="e.g., 2"
               />
             </div>
 
@@ -180,7 +203,6 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="flex justify-end pt-4 mt-6 border-t space-x-3">
             <button
               type="button"

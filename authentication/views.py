@@ -647,25 +647,100 @@ class SubmitClaimView(APIView):
 
     def post(self, request):
         data = request.data if isinstance(request.data, dict) else {}
-        required = ["userID", "policyID", "itemID", "amount", "reason"]
-        missing = [f for f in required if f not in data or data[f] in (None, "")]
+
+        # Accept flexible keys from clients (camelCase/snake_case/mixed) and header fallback for userID
+        headers = getattr(request, "headers", {}) or {}
+        meta = getattr(request, "META", {}) or {}
+
+        def _get_first(dct, keys, default=None):
+            for k in keys:
+                if k in dct and dct[k] not in (None, ""):
+                    return dct[k]
+            return default
+
+        # userID: prefer body but allow header fallbacks like x-user-id
+        raw_user = _get_first(
+            data,
+            ["userID", "userid", "UserID", "customer_id", "customerID"],
+        )
+        if raw_user in (None, ""):
+            raw_user = (
+                headers.get("x-user-id")
+                or headers.get("X-User-ID")
+                or headers.get("userid")
+                or headers.get("UserID")
+                or meta.get("HTTP_X_USER_ID")
+                or meta.get("HTTP_USERID")
+            )
+
+        raw_policy = _get_first(
+            data,
+            [
+                "policyID",
+                "policyId",
+                "policy_id",
+                "customerPlanID",
+                "customerPlanId",
+                "planID",
+                "planId",
+            ],
+        )
+        # itemID is optional to allow policy-level claim submission from UI that doesn't select an item yet
+        raw_item = _get_first(data, ["itemID", "itemId", "ItemID"]) 
+        raw_amount = _get_first(data, ["amount", "Amount", "claimAmount", "ClaimAmount"]) 
+        raw_reason = _get_first(data, ["reason", "Reason", "description", "claimReason", "notes"]) or ""
+        loss_date = _get_first(data, ["lossDate", "loss_date", "LossDate"])  # optional; accept ISO string
+
+        # Validate presence
+        missing = []
+        if raw_user in (None, ""): missing.append("userID")
+        if raw_policy in (None, ""): missing.append("policyID")
+        # itemID is optional; do not mark as missing
+        if raw_amount in (None, ""): missing.append("amount")
+        if raw_reason in (None, ""): missing.append("reason")
         if missing:
-            return Response({"error": {"missing": missing}}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "error": {
+                        "detail": "Missing required fields.",
+                        "missing": missing,
+                        "acceptedKeys": {
+                            "userID": ["userID", "userid", "UserID", "x-user-id (header)"],
+                            "policyID": ["policyID", "policyId", "customerPlanID", "customerPlanId", "planID", "planId"],
+                            "itemID": ["itemID", "itemId"],
+                            "amount": ["amount", "Amount", "claimAmount", "ClaimAmount"],
+                            "reason": ["reason", "Reason", "description", "claimReason", "notes"],
+                        },
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Coerce types
         try:
-            user_id = int(data.get("userID"))
-            policy_id = int(data.get("policyID"))
-            item_id = int(data.get("itemID"))
+            user_id = int(str(raw_user).strip())
+            policy_id = int(str(raw_policy).strip())
         except (ValueError, TypeError):
-            return Response({"error": "userID, policyID, and itemID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "userID and policyID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+        # item_id optional
+        item_id = None
+        if raw_item not in (None, ""):
+            try:
+                item_id = int(str(raw_item).strip())
+            except (ValueError, TypeError):
+                return Response({"error": "itemID must be an integer when provided"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Amount: accept strings with currency symbols/commas
+        from decimal import Decimal as _Dec
         try:
-            amount = Decimal(str(data.get("amount")))
+            amt_str = str(raw_amount).strip()
+            # Remove common formatting: $  ,
+            amt_clean = amt_str.replace("$", "").replace(",", "")
+            amount = _Dec(amt_clean)
         except Exception:
             return Response({"error": "amount must be numeric"}, status=status.HTTP_400_BAD_REQUEST)
 
-        reason = str(data.get("reason", "")).strip()
-        loss_date = data.get("lossDate")  # optional; accept ISO string
+        reason = str(raw_reason).strip()
 
         # Resolve customer by userID
         try:
@@ -701,31 +776,34 @@ class SubmitClaimView(APIView):
         if not policy:
             return Response({"error": "Policy not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate item belongs to this customer
-        try:
-            item = Item.objects(ItemID=item_id, CustomerID=customer.CustomerID).first()
-            if not item:
-                item = Item.objects(__raw__={"ItemID": item_id, "CustomerID": customer.CustomerID}).first()
-        except Exception as e:
-            msg = "Database connection error"
-            if settings.DEBUG:
-                msg = f"Database error: {e}"
-            return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Validate item belongs to this customer (only if provided)
+        item = None
+        if item_id is not None:
+            try:
+                item = Item.objects(ItemID=item_id, CustomerID=customer.CustomerID).first()
+                if not item:
+                    item = Item.objects(__raw__={"ItemID": item_id, "CustomerID": customer.CustomerID}).first()
+            except Exception as e:
+                msg = "Database connection error"
+                if settings.DEBUG:
+                    msg = f"Database error: {e}"
+                return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        if not item:
-            return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
+            if not item:
+                return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
         # Prevent duplicate open claims on the same item (status Filed=1, In Review=2)
-        try:
-            open_claim = ClaimRecord.objects(__raw__={
-                "ItemID": item_id,
-                "CurrentStatusID": {"$in": [1, 2]}
-            }).first()
-        except Exception:
-            open_claim = None
+        if item_id is not None:
+            try:
+                open_claim = ClaimRecord.objects(__raw__={
+                    "ItemID": item_id,
+                    "CurrentStatusID": {"$in": [1, 2]}
+                }).first()
+            except Exception:
+                open_claim = None
 
-        if open_claim:
-            return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
+            if open_claim:
+                return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
 
         # Generate next ClaimID (simple max+1)
         try:
@@ -747,7 +825,7 @@ class SubmitClaimView(APIView):
         try:
             claim = ClaimRecord(
                 ClaimID=next_id,
-                ItemID=item_id,
+                ItemID=item_id if item_id is not None else None,
                 CurrentStatusID=1,  # Filed
                 LossDate=loss_dt,
                 ClaimedValueAtTime=str(amount),
@@ -762,12 +840,13 @@ class SubmitClaimView(APIView):
             return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Mark item as in-progress (add a field without strict schema enforcement)
-        try:
-            setattr(item, "ClaimStatus", "In Progress")
-            item.save()
-        except Exception:
-            # best effort; do not fail claim creation if item update fails
-            pass
+        if item is not None:
+            try:
+                setattr(item, "ClaimStatus", "In Progress")
+                item.save()
+            except Exception:
+                # best effort; do not fail claim creation if item update fails
+                pass
 
         # Log workflow history (Filed) with agent/employee name resolved from assignment
         try:

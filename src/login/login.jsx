@@ -42,23 +42,46 @@ const Login = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log("Username:", username, "Password:", password);
+    setErrorMessage("");
+
+    // Trim to avoid accidental whitespace causing 401
+    const uname = (username || "").trim();
+    const pwd = (password || "").trim();
+
+    console.log("Username:", uname, "Password:", pwd);
+
+    // Prepare payload: backend accepts username or email; if the input looks like an email, send in both fields
+    const looksLikeEmail = uname.includes("@");
+    const body = looksLikeEmail
+      ? { username: uname, email: uname, password: pwd }
+      : { username: uname, password: pwd };
+
     fetch("http://127.0.0.1:8000/api/auth/login/", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(body),
     })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
+      .then(async (response) => {
+        // Try to parse JSON for both success and error responses
+        let data = null;
+        try {
+          data = await response.json();
+        } catch (_e) {
+          // Non-JSON or empty body
         }
 
-        return response.json();
+        if (!response.ok) {
+          const detail = (data && (data.error?.detail || data.error || data.message)) || `HTTP ${response.status}`;
+          throw new Error(typeof detail === "string" ? detail : `HTTP error! Status: ${response.status}`);
+        }
+
+        return data;
       })
       .then((data) => {
         if (data.approved) {
@@ -83,14 +106,15 @@ const Login = () => {
             localStorage.setItem("userRoleID", data.user.roleID);
           } else {
             console.log(data.user);
-            console.log("Login failed: Insufficient permissions");
+            setErrorMessage("Login failed: Insufficient permissions");
           }
         } else {
-          console.log("Login failed: User not approved");
+          setErrorMessage("Login failed: User not approved");
         }
       })
       .catch((error) => {
         console.error("Error during login:", error);
+        setErrorMessage(String(error?.message || error));
       });
   };
 
@@ -104,6 +128,12 @@ const Login = () => {
         </div>
 
         <form onSubmit={handleSubmit}>
+          {/* Error message */}
+          {errorMessage && (
+            <div className="error-text" style={{ color: "#b00020", marginBottom: 12 }}>
+              {errorMessage}
+            </div>
+          )}
           {/* Username Input */}
           <div className="form-group">
             <input

@@ -5,13 +5,14 @@ function UserClaimsPage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const navigate = useNavigate();
   const storedUserID = localStorage.getItem("userID");
 
   const navItems = [
-    { name: "Policies", path: "/home" },
-    { name: "Claims", path: "/userClaims" },
+    { name: "Policies", path: "/userHomePage" },
+    { name: "Claims", path: "/claims" },
   ];
 
   const handleLogout = () => {
@@ -26,35 +27,29 @@ function UserClaimsPage() {
     }
 
     const fetchClaims = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        // TODO: Insert API call here (e.g., GET http://127.0.0.1:8000/api/user/claims/)
+        // Use the ClaimListCreateView endpoint defined in urls.py
+        const response = await fetch("http://127.0.0.1:8000/api/claims/", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            // The backend requires x-user-id to filter claims for this specific customer
+            "x-user-id": storedUserID,
+          },
+        });
 
-        const mockData = [
-          {
-            ClaimID: 101,
-            PolicyID: "P001",
-            Reason: "Water Damage",
-            Amount: 5000,
-            Status: "Pending",
-          },
-          {
-            ClaimID: 102,
-            PolicyID: "P003",
-            Reason: "Car Accident",
-            Amount: 1200,
-            Status: "Approved",
-          },
-          {
-            ClaimID: 103,
-            PolicyID: "P001",
-            Reason: "Theft",
-            Amount: 800,
-            Status: "Rejected",
-          },
-        ];
-        setClaims(mockData);
-      } catch (error) {
-        console.error(error);
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        // The API returns { "claims": [...] }
+        setClaims(data.claims || []);
+      } catch (err) {
+        console.error("Error fetching claims:", err);
+        setError("Failed to load claims. Please try again later.");
       } finally {
         setLoading(false);
       }
@@ -63,8 +58,17 @@ function UserClaimsPage() {
     fetchClaims();
   }, [storedUserID, navigate]);
 
+  // Helper to normalize status for badge coloring
+  const getStatusColor = (status) => {
+    const s = (status || "").toLowerCase();
+    if (s === "accepted" || s === "approved") return "bg-green-100 text-green-700";
+    if (s === "rejected" || s === "denied") return "bg-red-100 text-red-700";
+    return "bg-blue-100 text-blue-700"; // submitted/pending
+  };
+
   return (
     <div className="flex bg-gray-100 min-h-screen">
+      {/* Sidebar */}
       <div
         className={`fixed bg-white w-64 h-screen shadow-2xl transition-transform duration-300 ease-in-out z-40 flex flex-col ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -93,7 +97,6 @@ function UserClaimsPage() {
               }`}
               onClick={() => navigate(item.path)}
             >
-              <span className="text-xl mr-3">{item.icon}</span>
               <div className="font-semibold">{item.name}</div>
             </button>
           ))}
@@ -104,7 +107,6 @@ function UserClaimsPage() {
             onClick={handleLogout}
             className="flex items-center w-full text-left p-3 rounded-lg text-gray-600 hover:bg-red-50 hover:text-red-600 transition duration-150 group"
           >
-            <span className="text-xl mr-3 group-hover:scale-110 transition-transform"></span>
             <div className="font-bold">Sign Out</div>
           </button>
           <div className="mt-4 text-xs text-gray-400 px-2">
@@ -113,6 +115,7 @@ function UserClaimsPage() {
         </div>
       </div>
 
+      {/* Main Content */}
       <main className="flex-1 overflow-y-auto h-screen flex flex-col">
         <header className="sticky top-0 bg-white flex justify-between items-center p-4 shadow-md z-30">
           <button
@@ -131,12 +134,21 @@ function UserClaimsPage() {
         </header>
 
         <div className="p-6 flex-1 overflow-y-auto">
-          {loading ? (
+          {loading && (
             <div className="text-center p-10 text-gray-500 text-lg flex flex-col items-center">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-3"></div>
               Loading claims...
             </div>
-          ) : claims.length === 0 ? (
+          )}
+
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+              <strong className="font-bold">Error: </strong>
+              <span className="block sm:inline">{error}</span>
+            </div>
+          )}
+
+          {!loading && !error && claims.length === 0 && (
             <div className="text-center p-12 bg-white rounded-lg shadow-lg border border-gray-200">
               <div className="text-4xl mb-3">📂</div>
               <p className="text-xl text-gray-600 font-semibold">
@@ -146,17 +158,19 @@ function UserClaimsPage() {
                 You haven't submitted any claims yet.
               </p>
             </div>
-          ) : (
+          )}
+
+          {!loading && !error && claims.length > 0 && (
             <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-gray-600">
                   <thead className="bg-gray-50 text-gray-700 font-bold uppercase">
                     <tr>
                       <th className="p-4">Claim ID</th>
-                      <th className="p-4">Policy</th>
+                      <th className="p-4">Policy / Plan ID</th>
                       <th className="p-4">Reason</th>
-                      <th className="p-4">Amount</th>
-                      <th className="p-4">Status</th>
+                      <th className="p-4 text-right">Amount</th>
+                      <th className="p-4 text-center">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -169,23 +183,20 @@ function UserClaimsPage() {
                           #{claim.ClaimID}
                         </td>
                         <td className="p-4 font-mono text-blue-600">
-                          {claim.PolicyID}
+                          {/* Display CustomerPlanID, fallback to PolicyID */}
+                          {claim.CustomerPlanID || claim.PolicyID || "N/A"}
                         </td>
                         <td className="p-4 font-medium text-gray-800">
                           {claim.Reason}
                         </td>
-                        <td className="p-4 text-gray-600">
-                          ${claim.Amount.toLocaleString()}
+                        <td className="p-4 text-gray-600 text-right font-mono">
+                          ${(claim.Amount || 0).toLocaleString()}
                         </td>
-                        <td className="p-4">
+                        <td className="p-4 text-center">
                           <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
-                              claim.Status === "Approved"
-                                ? "bg-green-100 text-green-700"
-                                : claim.Status === "Rejected"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-yellow-100 text-yellow-700"
-                            }`}
+                            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${getStatusColor(
+                              claim.Status
+                            )}`}
                           >
                             {claim.Status}
                           </span>
