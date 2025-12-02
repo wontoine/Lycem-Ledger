@@ -72,10 +72,11 @@ function AgentHomePage() {
     }
   }, [storedUserID, navigate]);
 
+  // Icons removed from config
   const navItems = [
-    { id: "policies", name: "My Policies", icon: "Tb" },
-    { id: "claims", name: "Active Claims", icon: "Tb" },
-    { id: "create", name: "Create Policy", icon: "Tb" },
+    { id: "policies", name: "My Policies" },
+    { id: "claims", name: "Active Claims" },
+    { id: "create", name: "Create Policy" },
   ];
 
   const handleSignOut = () => {
@@ -167,7 +168,6 @@ function AgentHomePage() {
       }
 
       // Update local state to reflect new decision without full refetch
-      // This will automatically move the claim from Pending to Past Claims
       setClaims((prev) =>
         (prev || []).map((c) => {
           if (c.ClaimID !== claimId) return c;
@@ -276,7 +276,10 @@ function AgentHomePage() {
               <h2 className="text-2xl font-bold">{policy.PlanName}</h2>
               <p className="text-blue-100">Policy #{policy.PolicyID}</p>
             </div>
-            <button onClick={onClose} className="text-white hover:text-blue-200 text-2xl">
+            <button
+              onClick={onClose}
+              className="text-white hover:text-blue-200 text-2xl"
+            >
               ×
             </button>
           </div>
@@ -389,7 +392,7 @@ function AgentHomePage() {
   );
 
   const renderClaimsTab = () => {
-    // 1. Separate claims into Pending vs Past based on agentApprovalStatus
+    // Separate claims into Pending vs Past based on agentApprovalStatus
     const pendingClaims = claims.filter(
       (c) =>
         !c.agentApprovalStatus ||
@@ -444,7 +447,9 @@ function AgentHomePage() {
                         <td className="p-4 font-mono">
                           {claim.CustomerPlanID || claim.PolicyID}
                         </td>
-                        <td className="p-4 max-w-xs truncate">{claim.Reason}</td>
+                        <td className="p-4 max-w-xs truncate">
+                          {claim.Reason}
+                        </td>
                         <td className="p-4 font-semibold text-gray-800">
                           ${claim.Amount?.toLocaleString()}
                         </td>
@@ -543,7 +548,9 @@ function AgentHomePage() {
                         <td className="p-4 font-mono">
                           {claim.CustomerPlanID || claim.PolicyID}
                         </td>
-                        <td className="p-4 max-w-xs truncate">{claim.Reason}</td>
+                        <td className="p-4 max-w-xs truncate">
+                          {claim.Reason}
+                        </td>
                         <td className="p-4 text-gray-800">
                           ${claim.Amount?.toLocaleString()}
                         </td>
@@ -551,8 +558,9 @@ function AgentHomePage() {
                           <div className="flex flex-col">
                             <span
                               className={`text-xs font-bold uppercase ${
-                                (claim.agentApprovalStatus || "").toLowerCase() ===
-                                "approved"
+                                (
+                                  claim.agentApprovalStatus || ""
+                                ).toLowerCase() === "approved"
                                   ? "text-green-600"
                                   : "text-red-600"
                               }`}
@@ -569,17 +577,17 @@ function AgentHomePage() {
                         <td className="p-4">
                           <span
                             className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                              (claim.managerApprovalStatus || "").toLowerCase() ===
-                              "approved"
+                              (
+                                claim.managerApprovalStatus || ""
+                              ).toLowerCase() === "approved"
                                 ? "bg-green-100 text-green-700"
-                                : (claim.managerApprovalStatus || "").toLowerCase() ===
-                                  "rejected"
+                                : (
+                                    claim.managerApprovalStatus || ""
+                                  ).toLowerCase() === "rejected"
                                 ? "bg-red-100 text-red-700"
                                 : "bg-yellow-100 text-yellow-700"
                             }`}
                           >
-                            {/* Fallback to overall status if manager status is missing,
-                                but explicit managerApprovalStatus is preferred */}
                             {claim.managerApprovalStatus ||
                               (claim.Status === "accepted"
                                 ? "Approved"
@@ -796,9 +804,6 @@ function AgentHomePage() {
                 setSidebaropen(false);
               }}
             >
-              <span className="text-xl mr-3 group-hover:scale-110 transition-transform">
-                📋
-              </span>
               <span className="font-semibold">{item.name}</span>
             </button>
           ))}

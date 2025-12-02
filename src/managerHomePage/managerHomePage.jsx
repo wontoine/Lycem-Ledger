@@ -5,7 +5,7 @@ function ManagerHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [activeTab, setActiveTab] = useState("approvals");
 
-  // --- Original State ---
+  // State for Policy Management (Approvals & Assignments) and Agent oversight
   const [pendingPolicies, setPendingPolicies] = useState([]);
   const [agents, setAgents] = useState([]);
   const [allPolicies, setAllPolicies] = useState([]);
@@ -15,7 +15,7 @@ function ManagerHomePage() {
   const [processingId, setProcessingId] = useState(null);
   const [assignmentSelections, setAssignmentSelections] = useState({});
 
-  // --- New Claims State ---
+  // State specifically for the Claims Review workflow
   const [claims, setClaims] = useState([]);
   const [decisionNotes, setDecisionNotes] = useState({});
   const [decisionBusy, setDecisionBusy] = useState({});
@@ -23,18 +23,19 @@ function ManagerHomePage() {
   const navigate = useNavigate();
   const storedUserID = localStorage.getItem("userID");
 
+  // Redirect to login if no user session is found
   useEffect(() => {
     if (!storedUserID) {
       navigate("/", { replace: true });
     }
   }, [storedUserID, navigate]);
 
-  // --- 4 Tabs Configuration ---
+  // Sidebar navigation configuration (Icons removed as requested)
   const navItems = [
-    { id: "approvals", name: "Pending Policies" }, // Original Tab 1
-    { id: "claims", name: "Claim Reviews" },       // New Tab 4
-    { id: "assign", name: "Assign Policies" },     // Original Tab 2
-    { id: "overview", name: "Agent Overview" },    // Original Tab 3
+    { id: "approvals", name: "Pending Policies" },
+    { id: "claims", name: "Claim Reviews" },
+    { id: "assign", name: "Assign Policies" },
+    { id: "overview", name: "Agent Overview" },
   ];
 
   const handleSignOut = () => {
@@ -43,6 +44,7 @@ function ManagerHomePage() {
     navigate("/", { replace: true });
   };
 
+  // Fetches all required data for the dashboard in parallel
   const fetchData = async () => {
     if (!storedUserID) return;
 
@@ -55,17 +57,23 @@ function ManagerHomePage() {
         "x-user-id": String(storedUserID),
       };
 
+      // Execute all API requests simultaneously to reduce loading time
       const [pendingRes, agentsRes, allPolRes, claimsRes] = await Promise.all([
+        // 1. Policies waiting for approval
         fetch("http://127.0.0.1:8000/api/manager/policies/pending/", { headers }).catch(e => ({ ok: false })),
+        // 2. List of agents reporting to this manager
         fetch("http://127.0.0.1:8000/api/manager/employees/", { headers }).catch(e => ({ ok: false })),
+        // 3. Policies that need to be assigned to an agent
         fetch("http://127.0.0.1:8000/api/manager/policies/assignable/", { headers }).catch(e => ({ ok: false })),
+        // 4. Claims that have been approved by agents and need manager review
         fetch("http://127.0.0.1:8000/api/supervisor/claims/", { headers }).catch(e => ({ ok: false })),
       ]);
 
-      // --- Process Original Data ---
+      // Process Policy Approvals data
       if (pendingRes.ok) {
         const pendingData = await pendingRes.json();
         setCustomerPlans(pendingData.policies || []);
+        // Filter strictly for 'pending' status to avoid showing processed items
         const onlyPending = (pendingData.policies || []).filter((p) => {
           const s = String(p.Status || p.status || "pending").toLowerCase();
           return s === "pending";
@@ -73,17 +81,19 @@ function ManagerHomePage() {
         setPendingPolicies(onlyPending);
       }
 
+      // Process Employees list
       if (agentsRes.ok) {
         const agentsData = await agentsRes.json();
         setAgents(agentsData.employees || []);
       }
 
+      // Process Assignable Policies data
       if (allPolRes.ok) {
         const allPolData = await allPolRes.json();
         setAllPolicies(allPolData.policies || []);
       }
 
-      // --- Process New Claims Data ---
+      // Process Claims data
       if (claimsRes.ok) {
         const claimsData = await claimsRes.json();
         setClaims(claimsData.claims || []);
@@ -102,7 +112,7 @@ function ManagerHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedUserID]);
 
-  // --- Original Policy Decision Handler ---
+  // Handles the Manager's decision to Approve or Deny a new Policy
   const handleDecision = async (policyId, decision) => {
     console.log(`Policy ${policyId} decision: ${decision}`);
     setProcessingId(policyId);
@@ -128,6 +138,7 @@ function ManagerHomePage() {
         }
         const newStatus = (data && (data.newStatus || data.status)) || (decision === "approve" ? "approved" : "denied");
 
+        // Optimistically update the UI to remove the item from the pending list
         setAllPolicies((prev) =>
           prev.map((p) =>
             p.PolicyID === policyId ? { ...p, Status: newStatus } : p
@@ -145,7 +156,7 @@ function ManagerHomePage() {
     }
   };
 
-  // --- Original Agent Assignment Handler ---
+  // Helper to update the temporary state of dropdown selections for assignments
   const handleSelectionChange = (policyId, agentId) => {
     setAssignmentSelections((prev) => ({
       ...prev,
@@ -153,6 +164,7 @@ function ManagerHomePage() {
     }));
   };
 
+  // Commits the assignment of a Policy to a specific Agent
   const handleAssignAgent = async (policyId) => {
     const agentId = assignmentSelections[policyId];
     if (!agentId) return alert("Please select an agent first.");
@@ -176,11 +188,13 @@ function ManagerHomePage() {
         throw new Error(errorData.error || "Failed to assign");
       }
 
+      // Update local state to reflect the new assignment immediately
       setAllPolicies((prev) =>
         prev.map((p) =>
           p.PolicyID === policyId ? { ...p, assignedAgentID: agentId } : p
         )
       );
+      // Clear the dropdown selection
       setAssignmentSelections((prev) => {
         const newState = { ...prev };
         delete newState[policyId];
@@ -194,7 +208,7 @@ function ManagerHomePage() {
     }
   };
 
-  // --- NEW Claim Decision Handler ---
+  // Handles the Manager's decision to Approve or Deny a Claim
   const handleClaimDecision = async (claimId, decision) => {
     if (!storedUserID) return;
     const note = (decisionNotes?.[claimId] || "").trim();
@@ -219,6 +233,7 @@ function ManagerHomePage() {
       }
       const data = await res.json();
 
+      // Update local state to move the claim from Pending to History
       setClaims((prev) =>
         prev.map((c) => {
           if (c.ClaimID !== claimId) return c;
@@ -231,6 +246,7 @@ function ManagerHomePage() {
           };
         })
       );
+      // Clear the note input
       setDecisionNotes((prev) => ({ ...prev, [claimId]: "" }));
     } catch (err) {
       console.error(err);
@@ -241,8 +257,9 @@ function ManagerHomePage() {
   };
 
 
-  // --- Renderers ---
+  // --- View Components ---
 
+  // Renders a single Policy card for the "Pending Policies" tab
   const renderApprovalCard = (policy) => (
     <div
       key={policy.PolicyID}
@@ -290,6 +307,7 @@ function ManagerHomePage() {
     </div>
   );
 
+  // Renders the table for assigning policies to agents
   const renderAssignTab = () => {
     const policiesToAssign = allPolicies.filter(
       (p) => !p.assignedAgentID && p.Status !== "rejected"
@@ -385,6 +403,7 @@ function ManagerHomePage() {
     );
   };
 
+  // Renders the agent workload overview
   const renderOverviewTab = () => {
     const getassignedAgentID = (p) => {
       const v =
@@ -461,8 +480,9 @@ function ManagerHomePage() {
     );
   };
 
-  // --- NEW Render Tab: Claims ---
+  // Renders the Claims workflow tab (New Feature)
   const renderClaimsTab = () => {
+    // Filter claims into pending (needs attention) and history (already processed)
     const pendingClaims = claims.filter(
       (c) => !c.managerApprovalStatus || c.managerApprovalStatus.toLowerCase() === "pending"
     );
@@ -472,7 +492,7 @@ function ManagerHomePage() {
 
     return (
       <div className="space-y-10 max-w-6xl mx-auto">
-        {/* Section: Pending Reviews */}
+        {/* Sub-section: Claims waiting for Manager decision */}
         <section>
           <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span>⚖️</span> Reviews Required
@@ -554,7 +574,7 @@ function ManagerHomePage() {
           </div>
         </section>
 
-        {/* Section: Past Claims History */}
+        {/* Sub-section: History of processed claims */}
         <section>
           <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span>🗄️</span> Claims History
@@ -608,6 +628,7 @@ function ManagerHomePage() {
 
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
+      {/* Sidebar Navigation */}
       <div
         className={`fixed inset-y-0 left-0 bg-white w-64 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -654,6 +675,7 @@ function ManagerHomePage() {
         </div>
       </div>
 
+      {/* Main Content Area */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm z-30 p-4 flex items-center justify-between lg:justify-end">
           <button

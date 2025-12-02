@@ -41,12 +41,19 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes", "
 # Allow both local development and Turing server
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'turing.cs.olemiss.edu',]
 
-# CORS configuration for local dev (Vite may use 5173 or 5174)
+# CORS configuration
+# Default to permissive CORS in development to avoid users seeing generic "Access denied" due to origin mismatch.
+# In production, set environment variables to restrict origins as needed.
 CORS_ALLOWED_ORIGINS = [
+    # Common local dev origins (Vite/React)
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "http://127.0.0.1:3000",
+    # Turing server http (adjust if using https)
+    "http://turing.cs.olemiss.edu",
 ]
 
 # If using cookies/session auth from the browser, enable credentials and trust CSRF origins
@@ -54,22 +61,47 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "http://127.0.0.1:3000",
+    "http://turing.cs.olemiss.edu",
 ]
 
 
 # Allow custom headers used by the frontend (e.g., x-user-id) in CORS preflight
 # This fixes: "Request header field x-user-id is not allowed by Access-Control-Allow-Headers"
 CORS_ALLOW_HEADERS = list(default_headers) + [
-    "x-user-id", "userID", "UserID", 
+    # Custom and commonly used headers by our frontends/clients
+    "x-user-id",
+    "userID",
+    "UserID",
+    "authorization",
+    "x-csrftoken",
+    "x-csrf-token",
+    "content-disposition",
+]
+
+# Expose headers which clients may need to read programmatically
+CORS_EXPOSE_HEADERS = [
+    "x-user-id",
+    "content-disposition",
 ]
 
 
-# During local development, ensure CORS headers are always added
-# This helps avoid "No 'Access-Control-Allow-Origin' header" issues while debugging
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
+# During development or when explicitly enabled, relax CORS to avoid blocking legitimate users
+# You can set CORS_RELAXED=false in environment to disable this behavior.
+RELAXED_CORS = os.environ.get("CORS_RELAXED", "True").lower() in ("1", "true", "yes", "on")
+if DEBUG or RELAXED_CORS:
+    # Allow all origins while still allowing credentials by using regex matching of any http/https origin
+    # (Avoids sending '*' with credentials)
+    CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?://.*$"]
+    # Also allow private network requests from browsers that implement PNA
+    try:
+        # Available in django-cors-headers >= 4.1
+        CORS_ALLOW_PRIVATE_NETWORK = True  # type: ignore
+    except Exception:
+        pass
 
 
 # Application definition
