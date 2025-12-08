@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from "react";
+import { apiUrl } from "../lib/api";
 import { useNavigate } from "react-router-dom";
 import SubmitClaimModal from "./submitClaim";
 
+// Component: Modal displaying detailed information about a specific policy
+// It fetches deeper details (like insured items) when opened.
 const PolicyDetailsModal = ({
   policyId,
   userID,
@@ -11,10 +14,12 @@ const PolicyDetailsModal = ({
   const [details, setDetails] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // State for the "Add New Item" sub-form within the modal
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSavingItem, setIsSavingItem] = useState(false);
 
-  // Form State
+  // Form State: Captures input for adding a new insured item
   const [newItem, setNewItem] = useState({
     name: "",
     estimatedValue: "",
@@ -23,16 +28,18 @@ const PolicyDetailsModal = ({
     purchaseDate: "",
   });
 
+  // State: Stores file objects for item images
   const [itemImages, setItemImages] = useState({
     image1: null,
     image2: null,
   });
 
+  // Fetch detailed policy data (including items) when the modal mounts
   useEffect(() => {
     const fetchDetails = async () => {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/api/auth/policies/${policyId}`,
+          apiUrl(`/api/auth/policies/${policyId}`),
           {
             headers: {
               "Content-Type": "application/json",
@@ -55,12 +62,14 @@ const PolicyDetailsModal = ({
     if (policyId) fetchDetails();
   }, [policyId, userID]);
 
+  // Handler for file inputs (image uploads)
   const handleFileChange = (e, key) => {
     if (e.target.files && e.target.files[0]) {
       setItemImages((prev) => ({ ...prev, [key]: e.target.files[0] }));
     }
   };
 
+  // Submits the new item to the backend (Multipart form data for images)
   const handleAddItem = async (e) => {
     e.preventDefault();
 
@@ -74,6 +83,7 @@ const PolicyDetailsModal = ({
     try {
       const formData = new FormData();
 
+      // Format date for backend compatibility
       const dateStr = newItem.purchaseDate
         ? new Date(newItem.purchaseDate).toISOString().split(".")[0]
         : new Date().toISOString().split(".")[0];
@@ -89,7 +99,7 @@ const PolicyDetailsModal = ({
       formData.append("image2", itemImages.image2);
 
       const response = await fetch(
-        `http://127.0.0.1:8000/api/auth/items/add/`,
+        apiUrl(`/api/auth/items/add/`),
         {
           customerID: userID,
           customerPlanID: policyId,
@@ -105,11 +115,11 @@ const PolicyDetailsModal = ({
 
       const savedData = await response.json();
 
-      // Update local list
+      // Update local list with the newly created item
       const newItemObj = savedData.item || savedData;
       setItems([...items, newItemObj]);
 
-      // Reset Form
+      // Reset Form fields
       setNewItem({
         name: "",
         estimatedValue: "",
@@ -133,6 +143,7 @@ const PolicyDetailsModal = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-fade-in-up max-h-[90vh] flex flex-col">
+        {/* Modal Header */}
         <div className="bg-blue-600 p-6 flex justify-between items-start text-white shrink-0">
           <div>
             <h2 className="text-2xl font-bold">Policy Details</h2>
@@ -147,6 +158,7 @@ const PolicyDetailsModal = ({
           </button>
         </div>
 
+        {/* Modal Content Area */}
         <div className="p-6 overflow-y-auto flex-1">
           {loading ? (
             <div className="text-center py-10 text-gray-500">
@@ -154,6 +166,7 @@ const PolicyDetailsModal = ({
             </div>
           ) : details ? (
             <div className="space-y-6">
+              {/* Policy Summary Card */}
               <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-xl border border-blue-100">
                 <div>
                   <p className="text-xs font-bold text-blue-800 uppercase">
@@ -188,6 +201,7 @@ const PolicyDetailsModal = ({
                 </div>
               </div>
 
+              {/* Insured Items Section */}
               <div>
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-lg font-bold text-gray-800">
@@ -201,6 +215,7 @@ const PolicyDetailsModal = ({
                   </button>
                 </div>
 
+                {/* Add Item Form (Conditionally Rendered) */}
                 {showAddForm && (
                   <form
                     onSubmit={handleAddItem}
@@ -282,7 +297,6 @@ const PolicyDetailsModal = ({
                       </div>
                     </div>
 
-                    {/* Row 3 */}
                     <div className="mb-3">
                       <label className="text-xs font-bold text-gray-500">
                         Description
@@ -300,7 +314,7 @@ const PolicyDetailsModal = ({
                       />
                     </div>
 
-                    {/* Row 4: Images */}
+                    {/* Image Upload Inputs */}
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div>
                         <label className="block text-xs font-bold text-gray-500 mb-1">
@@ -338,7 +352,7 @@ const PolicyDetailsModal = ({
                   </form>
                 )}
 
-                {/* Items Table */}
+                {/* Items List Table */}
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm text-left">
                     <thead className="bg-gray-50 text-gray-500 font-bold">
@@ -398,7 +412,7 @@ const PolicyDetailsModal = ({
           )}
         </div>
 
-        {/* Footer Actions */}
+        {/* Modal Footer: Actions */}
         <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0 flex justify-end gap-3 rounded-b-2xl">
           <button
             onClick={onClose}
@@ -418,15 +432,16 @@ const PolicyDetailsModal = ({
   );
 };
 
-// --- Main Component ---
+// --- Main Page Component ---
 function UserHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
 
-  // Modals Control
+  // States for managing modals (Policy Details vs Submit Claim)
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
   const [selectedPolicyId, setSelectedPolicyId] = useState(null);
   const [claimPolicyData, setClaimPolicyData] = useState(null);
 
+  // Data states
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
@@ -444,6 +459,7 @@ function UserHomePage() {
     navigate("/");
   };
 
+  // On mount, verify user session and fetch their policies
   useEffect(() => {
     if (!storedUserID) {
       setLoading(false);
@@ -451,11 +467,11 @@ function UserHomePage() {
       return;
     }
 
-    // Fetch list of plans (Uses userID query param)
-    const API_URL = `http://127.0.0.1:8000/auth/customer/plans/?userID=${storedUserID}`;
+    // Endpoint retrieves plans assigned to the logged-in UserID
+    const API_URL = apiUrl(`/auth/customer/plans/?userID=${storedUserID}`);
 
     const fetchPolicies = async () => {
-      // Mock Data Fallback
+      // Fallback data structure for development/offline testing
       const mockPolicies = [
         {
           policy_id: "P001",
@@ -487,7 +503,7 @@ function UserHomePage() {
 
         let finalPolicies = [];
 
-        // Handle various API return shapes
+        // Normalize data structure (handle various API response formats)
         if (data && Array.isArray(data.plans)) {
           finalPolicies = data.plans;
         } else if (data && Array.isArray(data.policies)) {
@@ -523,8 +539,9 @@ function UserHomePage() {
     }
   };
 
+  // Opens the details modal for a specific policy
   const handlePolicyClick = (policy) => {
-    // Looks for keys in order: API (customerPlanID) -> Mock (PolicyID/policy_id)
+    // Determine the correct ID field based on data source
     const id = policy.customerPlanID || policy.PolicyID || policy.policy_id;
     if (id) {
       setSelectedPolicyId(id);
@@ -533,12 +550,14 @@ function UserHomePage() {
     }
   };
 
+  // Transitions from the Details Modal to the Submit Claim Modal
   const handleOpenClaimFromDetails = (policyDetails) => {
     setClaimPolicyData(policyDetails);
     setSelectedPolicyId(null);
     setIsClaimModalOpen(true);
   };
 
+  // Sub-component: Displays summary info for a single policy on the dashboard
   const PolicyCard = ({ policy, onClick }) => (
     <div
       onClick={onClick}
@@ -595,7 +614,7 @@ function UserHomePage() {
 
   return (
     <div className="flex bg-gray-100 min-h-screen">
-      {/* Sidebar */}
+      {/* Sidebar Navigation */}
       <div
         className={`fixed bg-white w-64 h-screen shadow-2xl transition-transform duration-300 ease-in-out z-40 flex flex-col ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -638,7 +657,7 @@ function UserHomePage() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto h-screen flex flex-col">
         <header className="sticky top-0 bg-white flex justify-between items-center p-4 shadow-md z-30">
           <button
@@ -689,6 +708,7 @@ function UserHomePage() {
             </div>
           )}
 
+          {/* Policies Grid */}
           <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-10">
             {policies.map((policy) => (
               <PolicyCard
@@ -703,7 +723,7 @@ function UserHomePage() {
         </div>
       </main>
 
-      {/* Detail Modal */}
+      {/* Conditional Modals */}
       {selectedPolicyId && (
         <PolicyDetailsModal
           policyId={selectedPolicyId}
@@ -713,7 +733,6 @@ function UserHomePage() {
         />
       )}
 
-      {/* Claim Modal */}
       {isClaimModalOpen && (
         <SubmitClaimModal
           onClose={() => setIsClaimModalOpen(false)}

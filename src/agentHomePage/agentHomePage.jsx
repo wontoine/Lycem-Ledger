@@ -1,37 +1,41 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiUrl } from "../lib/api";
 
 function AgentHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [activeTab, setActiveTab] = useState("policies");
 
-  // Data States
+  // Stores the list of policies assigned to this agent and claims requiring their attention
   const [myPolicies, setMyPolicies] = useState([]);
   const [claims, setClaims] = useState([]);
+
+  // UI states for loading feedback and error handling
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
 
-  // Interaction States
+  // Interaction states for modals and processing actions
   const [selectedPolicy, setSelectedPolicy] = useState(null);
   const [processing, setProcessing] = useState(false);
-  // Per-claim action state
-  const [decisionNotes, setDecisionNotes] = useState({}); // { [claimId]: note }
-  const [decisionBusy, setDecisionBusy] = useState({}); // { [claimId]: boolean }
 
-  // Create Policy Form State
+  // Per-claim temporary state for storing notes and disabling buttons during API calls
+  const [decisionNotes, setDecisionNotes] = useState({});
+  const [decisionBusy, setDecisionBusy] = useState({});
+
+  // State for the policy creation form
   const [newPolicyForm, setNewPolicyForm] = useState({
     CustomerID: "",
     PlanID: "",
   });
 
-  // State for the Custom Plan fields
+  // State specifically for custom plan details when "Customized Plan" is selected
   const [customDetails, setCustomDetails] = useState({
     description: "",
     coverage: "",
     price: "",
   });
 
-  // Defined Plans
+  // Pre-defined plan options available for agents to sell
   const availablePlans = [
     {
       planID: 1,
@@ -66,13 +70,14 @@ function AgentHomePage() {
   const navigate = useNavigate();
   const storedUserID = localStorage.getItem("userID");
 
+  // Redirect to login if user session is invalid
   useEffect(() => {
     if (!storedUserID) {
       navigate("/", { replace: true });
     }
   }, [storedUserID, navigate]);
 
-  // Icons removed from config
+  // Sidebar navigation items
   const navItems = [
     { id: "policies", name: "My Policies" },
     { id: "claims", name: "Active Claims" },
@@ -85,7 +90,7 @@ function AgentHomePage() {
     navigate("/", { replace: true });
   };
 
-  // --- Data Fetching ---
+  // Fetches initial data for the dashboard: Assigned Policies and Claims
   const fetchData = async () => {
     if (!storedUserID) return;
 
@@ -98,15 +103,17 @@ function AgentHomePage() {
         "x-user-id": String(storedUserID),
       };
 
+      // Fetch both endpoints in parallel for efficiency
       const [policiesRes, claimsRes] = await Promise.all([
-        fetch("http://127.0.0.1:8000/api/agent/policies/", { headers }).catch(
+        fetch(apiUrl("/api/agent/policies/"), { headers }).catch(
           (err) => ({ ok: false, error: err })
         ),
-        fetch("http://127.0.0.1:8000/api/agent/claims/", { headers }).catch(
+        fetch(apiUrl("/api/agent/claims/"), { headers }).catch(
           (err) => ({ ok: false, error: err })
         ),
       ]);
 
+      // Process Claims data
       let claimsData = [];
       if (claimsRes.ok) {
         const resJson = await claimsRes.json();
@@ -115,6 +122,7 @@ function AgentHomePage() {
         console.warn("Failed to fetch claims.");
       }
 
+      // Process Policies data
       let policiesData = [];
       if (policiesRes.ok) {
         const resJson = await policiesRes.json();
@@ -138,7 +146,7 @@ function AgentHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedUserID]);
 
-  // --- Agent Claim Decision ---
+  // Handles the Agent's decision to Accept or Reject a claim
   const handleClaimDecision = async (claimId, decision) => {
     if (!storedUserID) return;
     const note = (decisionNotes?.[claimId] || "").trim();
@@ -146,7 +154,7 @@ function AgentHomePage() {
     setDecisionBusy((prev) => ({ ...prev, [claimId]: true }));
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/claims/${claimId}/decision/`,
+        apiUrl(`/api/claims/${claimId}/decision/`),
         {
           method: "POST",
           headers: {
@@ -167,7 +175,7 @@ function AgentHomePage() {
         return;
       }
 
-      // Update local state to reflect new decision without full refetch
+      // Optimistically update local state to reflect the decision immediately
       setClaims((prev) =>
         (prev || []).map((c) => {
           if (c.ClaimID !== claimId) return c;
@@ -188,6 +196,7 @@ function AgentHomePage() {
         })
       );
 
+      // Clear the note input for this claim
       setDecisionNotes((prev) => ({ ...prev, [claimId]: "" }));
     } catch (err) {
       console.error("Network error submitting decision", err);
@@ -197,6 +206,7 @@ function AgentHomePage() {
     }
   };
 
+  // Handles creation of a new policy for a customer
   const handleCreatePolicy = async (e) => {
     e.preventDefault();
     setProcessing(true);
@@ -218,6 +228,7 @@ function AgentHomePage() {
       status: "pending",
     };
 
+    // Use custom details if the "Customized Plan" option is selected
     if (Number(selectedPlan.planID) === 4) {
       payload.Description = customDetails.description;
       payload.CoverageLim = parseFloat(customDetails.coverage);
@@ -230,7 +241,7 @@ function AgentHomePage() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:8000/api/agent/create-plan/",
+        apiUrl("/api/agent/create-plan/"),
         {
           method: "POST",
           headers: {
@@ -245,8 +256,10 @@ function AgentHomePage() {
 
       if (response.ok) {
         alert(`Policy Created Successfully! ID: ${data.customerPlanID}`);
+        // Reset form fields
         setNewPolicyForm({ CustomerID: "", PlanID: "" });
         setCustomDetails({ description: "", coverage: "", price: "" });
+        // Refresh data and switch view to the policies list
         await fetchData();
         setActiveTab("policies");
       } else {
@@ -265,7 +278,9 @@ function AgentHomePage() {
     }
   };
 
-  // --- Renderers ---
+  // --- Component Renderers ---
+
+  // Renders the modal showing detailed info about a selected policy
   const PolicyDetailsModal = ({ policy, onClose }) => {
     if (!policy) return null;
     return (
@@ -343,6 +358,7 @@ function AgentHomePage() {
     );
   };
 
+  // Renders the list of policies assigned to the agent
   const renderPoliciesTab = () => (
     <div>
       <h2 className="text-2xl font-bold text-gray-800 mb-6">
@@ -391,8 +407,9 @@ function AgentHomePage() {
     </div>
   );
 
+  // Renders the Claims Dashboard, split into Pending and History sections
   const renderClaimsTab = () => {
-    // Separate claims into Pending vs Past based on agentApprovalStatus
+    // Filter logic: Separate pending claims from those already processed
     const pendingClaims = claims.filter(
       (c) =>
         !c.agentApprovalStatus ||
@@ -608,6 +625,7 @@ function AgentHomePage() {
     );
   };
 
+  // Renders the form to create a new policy
   const renderCreateTab = () => {
     const isCustomPlan = Number(newPolicyForm.PlanID) === 4;
     const isValid =
@@ -774,6 +792,7 @@ function AgentHomePage() {
 
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
+      {/* Sidebar Navigation */}
       <div
         className={`fixed inset-y-0 left-0 bg-white w-64 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -818,6 +837,7 @@ function AgentHomePage() {
         </div>
       </div>
 
+      {/* Main Content Area */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm z-30 p-4 flex items-center justify-between lg:justify-end">
           <button

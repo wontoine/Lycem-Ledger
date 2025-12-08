@@ -10,10 +10,20 @@ import json
 
 
 def _now_utc():
+    """
+    Explanation: Helper to get the current time in UTC to ensure consistent timestamp storage.
+    Expected Input: None.
+    Expected Output: datetime object.
+    """
     return datetime.utcnow()
 
 
 def _print_api_payload(label: str, payload: dict):
+    """
+    Explanation: Debugging helper to print API response payloads to the server console.
+    Expected Input: A label string and a dictionary payload.
+    Expected Output: None (Writes to stdout).
+    """
     try:
         print(f"\n=== {label} RESPONSE JSON ===", flush=True)
         print(json.dumps(payload, indent=2, default=str), flush=True)
@@ -23,10 +33,20 @@ def _print_api_payload(label: str, payload: dict):
 
 
 def _new_log_id() -> int:
+    """
+    Explanation: Generates a unique numeric ID based on the current timestamp in milliseconds.
+    Expected Input: None.
+    Expected Output: Integer ID.
+    """
     return int(datetime.utcnow().timestamp() * 1000)
 
 
 def _current_user(request):
+    """
+    Explanation: Identifies the user making the request by looking for UserID headers.
+    Expected Input: HTTP Request with 'x-user-id' or 'userid' headers.
+    Expected Output: User object if found, else None.
+    """
     try:
         headers = getattr(request, "headers", {}) or {}
         meta = getattr(request, "META", {}) or {}
@@ -56,6 +76,11 @@ def _current_user(request):
 
 
 def _require_user(request):
+    """
+    Explanation: Validates authentication and checks if the user account is enabled.
+    Expected Input: HTTP Request.
+    Expected Output: Tuple (User, None) on success, or (None, Response) on failure.
+    """
     user = _current_user(request)
     if not user:
         return None, Response({"error": "Unauthorized: missing or invalid userid"},
@@ -66,10 +91,12 @@ def _require_user(request):
 
 
 def _is_admin(user: User) -> bool:
+    """Explanation: Checks if user has admin role."""
     return (user.role_name or "").lower() in ("admin", "superuser")
 
 
 def _is_manager(user: User) -> bool:
+    """Explanation: Checks if user is a Manager, Supervisor, or Admin."""
     try:
         role_id = int(getattr(user, "roleID", 0))
     except Exception:
@@ -91,11 +118,13 @@ def _is_manager(user: User) -> bool:
 
 
 def _is_agent(user: User) -> bool:
+    """Explanation: Checks if user is any type of staff (Agent, Manager, Admin)."""
     role = (user.role_name or "").lower()
     return role in ("agent", "employee", "manager", "supervisor", "admin", "superuser")
 
 
 def _has_full_access(user: User) -> bool:
+    """Explanation: Checks RoleID 3 or 4 (Manager/Admin)."""
     try:
         return int(getattr(user, "roleID", 0)) in (3, 4)
     except Exception:
@@ -103,6 +132,7 @@ def _has_full_access(user: User) -> bool:
 
 
 def _is_assigned_clients_only(user: User) -> bool:
+    """Explanation: Checks RoleID 2 (Agent)."""
     try:
         return int(getattr(user, "roleID", 0)) == 2
     except Exception:
@@ -110,6 +140,7 @@ def _is_assigned_clients_only(user: User) -> bool:
 
 
 def _is_self_only(user: User) -> bool:
+    """Explanation: Checks RoleID 1 (Customer)."""
     try:
         return int(getattr(user, "roleID", 0)) == 1
     except Exception:
@@ -117,6 +148,7 @@ def _is_self_only(user: User) -> bool:
 
 
 def _own_customer_ids(user: User):
+    """Explanation: Helper to find CustomerIDs belonging to a UserID."""
     try:
         custs = Customer.objects(UserID=user.userid)
         return {c.CustomerID for c in custs}
@@ -125,6 +157,7 @@ def _own_customer_ids(user: User):
 
 
 def _assigned_customer_ids(user: User):
+    """Explanation: Helper to find CustomerIDs assigned to a specific Agent."""
     try:
         custs = Customer.objects(__raw__={"AssignedAgentUserID": user.userid})
         cust_ids = {c.CustomerID for c in custs}
@@ -138,9 +171,9 @@ def _assigned_customer_ids(user: User):
 
 class AgentClaimsDashboard(APIView):
     """
-    Explanation: Returns claims assigned to the authenticated agent.
-    Expected Input: Header 'x-user-id'.
-    Expected Output: JSON object { "claims": [ ... ] }.
+    Explanation: Retrieves all claims associated with the authenticated Agent.
+    Expected Input: Header 'x-user-id' (Agent's UserID).
+    Expected Output: JSON { "claims": [ { "ClaimID": int, "Status": str, ... } ] }.
     """
 
     def get(self, request):
@@ -505,9 +538,9 @@ class AgentCreatePlanView(APIView):
 
 class ClaimDetailView(APIView):
     """
-    Explanation: CRUD operations for a specific claim.
-    Expected Input: URL param 'claim_id', Header 'x-user-id'.
-    Expected Output: JSON object with claim details.
+    Explanation: Standard CRUD (Get, Update, Delete) for a single specific claim ID.
+    Expected Input: URL Parameter 'claim_id', Header 'x-user-id'. PUT requires JSON Body for updates.
+    Expected Output: JSON object containing claim details (GET) or success status (PUT/DELETE).
     """
 
     def get(self, request, claim_id: int):
@@ -651,10 +684,9 @@ class ClaimDetailView(APIView):
 
 class ClaimDecisionView(APIView):
     """
-    Explanation: Agent submits a decision (accept/reject).
-    Note: Agent 'accept' sets Status to 'in_review', awaiting manager approval.
-    Expected Input: URL param 'claim_id', JSON Body { "decision": "accept"|"reject", "note": str }.
-    Expected Output: JSON object with new status.
+    Explanation: Endpoint for an Agent to approve or reject a claim. Approval moves it to 'in_review'.
+    Expected Input: URL Param 'claim_id'. JSON Body { "decision": "accept"|"reject", "note": str }.
+    Expected Output: JSON object with new status fields.
     """
 
     def post(self, request, claim_id: int):
@@ -717,7 +749,8 @@ class ClaimDecisionView(APIView):
 class SupervisorClaimsReviewList(APIView):
     """
     Explanation: Returns ALL claims approved by agents (for Manager dashboard).
-    Expected Input: Header 'x-user-id'.
+    Fix: Added robust checking for lowercase 'teamID' vs uppercase 'TeamID' to find customers.
+    Expected Input: Header 'x-user-id' (Manager).
     Expected Output: JSON object { "claims": [ ... ] }.
     """
 
@@ -736,7 +769,9 @@ class SupervisorClaimsReviewList(APIView):
                         {"UserID": user.userid},
                         {"userID": user.userid},
                     ]}).first()
-                team_id = getattr(sup, 'TeamID', None) if sup else None
+                team_id = getattr(sup, 'TeamID', None)
+                if team_id is None and hasattr(sup, '_data'):
+                    team_id = sup._data.get('teamID')
             except Exception:
                 team_id = None
 
@@ -776,7 +811,10 @@ class SupervisorClaimsReviewList(APIView):
 
             if team_id is not None:
                 try:
-                    team_direct_customers = Customer.objects(__raw__={"TeamID": team_id})
+                    team_direct_customers = Customer.objects(__raw__={"$or": [
+                        {"TeamID": team_id},
+                        {"teamID": team_id}
+                    ]})
                     for cust in team_direct_customers:
                         try:
                             cid = getattr(cust, 'CustomerID', None) or (
@@ -878,9 +916,9 @@ class SupervisorClaimsReviewList(APIView):
 
 class SupervisorClaimDecisionView(APIView):
     """
-    Explanation: Manager submits final decision (approve/deny). Sets Status to 'accepted' or 'rejected'.
-    Expected Input: URL param 'claim_id', JSON Body { "decision": "approve"|"deny", "note": str }.
-    Expected Output: JSON object with new status.
+    Explanation: Endpoint for Manager to finally Approve or Deny a claim. Sets status to 'accepted' or 'rejected'.
+    Expected Input: URL Param 'claim_id', JSON Body { "decision": "approve"|"deny", "note": str }.
+    Expected Output: JSON object with new status fields.
     """
 
     def post(self, request, claim_id: int):
@@ -967,11 +1005,17 @@ class ManagerEmployeesView(APIView):
                     ]}).first()
             except Exception:
                 sup = None
-            team_id = getattr(sup, 'TeamID', None) if sup else None
+
+            # Robust casing check for TeamID
+            team_id = getattr(sup, 'TeamID', None)
+            if team_id is None and hasattr(sup, '_data'):
+                team_id = sup._data.get('teamID')
+
             if team_id is None:
                 return Response({"employees": []}, status=status.HTTP_200_OK)
 
             try:
+                # Robust casing query for TeamID in Agents
                 team_agents = list(Agent.objects(__raw__={"$or": [
                     {"TeamID": team_id},
                     {"teamID": team_id},
@@ -1071,12 +1115,26 @@ class ManagerPoliciesView(APIView):
             query = {}
             if not _is_admin(user):
                 sup = Supervisor.objects(UserID=user.userid).first()
-                if not sup or getattr(sup, 'TeamID', None) is None:
-                    return Response({"policies": []}, status=status.HTTP_200_OK)
+                if not sup:
+                    sup = Supervisor.objects(__raw__={"$or": [
+                        {"UserID": user.userid},
+                        {"userID": user.userid},
+                    ]}).first()
+
+                # Robust casing check for TeamID
                 team_id = getattr(sup, 'TeamID', None)
+                if team_id is None and hasattr(sup, '_data'):
+                    team_id = sup._data.get('teamID')
+
+                if team_id is None:
+                    return Response({"policies": []}, status=status.HTTP_200_OK)
 
                 try:
-                    team_customers = Customer.objects(__raw__={"TeamID": team_id})
+                    # Robust query for customers by TeamID
+                    team_customers = Customer.objects(__raw__={"$or": [
+                        {"TeamID": team_id},
+                        {"teamID": team_id}
+                    ]})
                     cust_ids = [c.CustomerID for c in team_customers]
                 except Exception:
                     cust_ids = []
@@ -1131,18 +1189,7 @@ class ManagerPendingPoliciesView(APIView):
                 manager_userid = None
 
             if manager_userid is None:
-                payload = {"policies": []}
-                if debug:
-                    payload["debug_info"] = {
-                        "reason": "missing x-user-id",
-                        "manager_userid": None,
-                        "supervisor_found": False,
-                        "team_id": None,
-                        "team_customer_count": 0,
-                        "plans_count_returned": 0,
-                    }
-                _print_api_payload("ManagerPendingPoliciesView", payload)
-                return Response(payload, status=status.HTTP_200_OK)
+                return Response({"policies": []}, status=status.HTTP_200_OK)
 
             sup = None
             try:
@@ -1155,39 +1202,26 @@ class ManagerPendingPoliciesView(APIView):
             except Exception:
                 sup = None
 
-            if not sup or getattr(sup, 'TeamID', None) is None:
-                payload = {"policies": []}
-                if debug:
-                    payload["debug_info"] = {
-                        "manager_userid": manager_userid,
-                        "supervisor_found": False,
-                        "team_id": None,
-                        "team_customer_count": 0,
-                        "plans_count_returned": 0,
-                    }
-                _print_api_payload("ManagerPendingPoliciesView", payload)
-                return Response(payload, status=status.HTTP_200_OK)
-
+            # Robust casing check for TeamID
             team_id = getattr(sup, 'TeamID', None)
+            if team_id is None and hasattr(sup, '_data'):
+                team_id = sup._data.get('teamID')
+
+            if team_id is None:
+                return Response({"policies": []}, status=status.HTTP_200_OK)
 
             try:
-                team_customers = Customer.objects(__raw__={"TeamID": team_id})
+                # Robust query for customers by TeamID
+                team_customers = Customer.objects(__raw__={"$or": [
+                    {"TeamID": team_id},
+                    {"teamID": team_id}
+                ]})
                 cust_ids = [c.CustomerID for c in team_customers]
             except Exception:
                 cust_ids = []
 
             if not cust_ids:
-                payload = {"policies": []}
-                if debug:
-                    payload["debug_info"] = {
-                        "manager_userid": manager_userid,
-                        "supervisor_found": True,
-                        "team_id": team_id,
-                        "team_customer_count": 0,
-                        "plans_count_returned": 0,
-                    }
-                _print_api_payload("ManagerPendingPoliciesView", payload)
-                return Response(payload, status=status.HTTP_200_OK)
+                return Response({"policies": []}, status=status.HTTP_200_OK)
 
             plans = CustomerPlan.objects(CustomerID__in=cust_ids)
 
@@ -1260,15 +1294,6 @@ class ManagerPendingPoliciesView(APIView):
             ]
 
             payload = {"policies": data}
-            if debug:
-                payload["debug_info"] = {
-                    "manager_userid": manager_userid,
-                    "supervisor_found": True,
-                    "team_id": team_id,
-                    "team_customer_count": len(cust_ids),
-                    "plans_count_returned": len(data),
-                }
-            _print_api_payload("ManagerPendingPoliciesView", payload)
             return Response(payload, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1299,11 +1324,20 @@ class ManagerAssignablePoliciesView(APIView):
                     ]}).first()
             except Exception:
                 sup = None
-            team_id = getattr(sup, 'TeamID', None) if sup else None
+
+            # Robust casing check for TeamID
+            team_id = getattr(sup, 'TeamID', None)
+            if team_id is None and hasattr(sup, '_data'):
+                team_id = sup._data.get('teamID')
+
             if team_id is None:
                 return Response({"policies": []}, status=status.HTTP_200_OK)
 
-            team_customers = Customer.objects(__raw__={"TeamID": team_id})
+            # Robust query for customers by TeamID
+            team_customers = Customer.objects(__raw__={"$or": [
+                {"TeamID": team_id},
+                {"teamID": team_id}
+            ]})
             cust_ids = [c.CustomerID for c in team_customers]
             if not cust_ids:
                 return Response({"policies": []}, status=status.HTTP_200_OK)

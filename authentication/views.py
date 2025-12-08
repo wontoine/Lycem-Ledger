@@ -12,7 +12,8 @@ import re
 import uuid
 from pathlib import Path
 
-from users.models import User, Role, Customer, CustomerPlan, InsurancePlan, Item, ClaimRecord, Agent, ClaimWorkflowHistory
+from users.models import User, Role, Customer, CustomerPlan, InsurancePlan, Item, ClaimRecord, Agent, \
+    ClaimWorkflowHistory
 from django.utils import timezone
 from decimal import Decimal
 from datetime import datetime
@@ -25,11 +26,11 @@ from .serializers import (
 
 
 def _classify_account(email) -> str:
+    """Helper to classify account type based on email domain."""
     try:
         domain = settings.COMPANY_EMAIL_DOMAIN.lower()
         if isinstance(email, str) and "@" in email and email.lower().endswith(f"@{domain}"):
             return "employee"
-        # If an email-like string is provided but not company domain, treat as customer.
         if isinstance(email, str) and "@" in email:
             return "customer"
         return "unknown"
@@ -38,6 +39,7 @@ def _classify_account(email) -> str:
 
 
 def _role_name_for(role_id: int) -> str:
+    """Helper to resolve role ID to role name."""
     try:
         role = Role.objects(roleID=role_id).first()
         return role.RoleName if role else "unknown"
@@ -46,9 +48,7 @@ def _role_name_for(role_id: int) -> str:
 
 
 def _default_customer_role_id() -> int:
-    """
-    Resolve the role ID used for newly created customer accounts.
-    """
+    """Resolve the default role ID for new customers."""
     try:
         role = Role.objects(RoleName__iexact="customer").first()
         if role:
@@ -66,24 +66,17 @@ def _default_customer_role_id() -> int:
 
 class LoginView(APIView):
     """
-    Prototype login endpoint.
-    - Accepts JSON: {"username", "password"}
-    - Looks up user in MongoDB (MongoEngine)
-    - Checks password (supports current plaintext or PBKDF2-hash form)
-    - Classifies account type based on company email domain
-    - Returns approval result (no session/JWT yet)
+    Explanation: Authenticates a user using username (or email) and password.
+    Expected Input: JSON Body { "username": str, "password": str } (or "email").
+    Expected Output: JSON object with user details and approval status.
     """
 
     def get(self, request):
-        """
-        Provide usage information for this endpoint when accessed via GET.
-        This avoids a 405 response in browsers and gives quick guidance.
-        """
         return Response(
             {
                 "endpoint": "/api/auth/login/",
                 "methods": ["POST"],
-                "usage": "POST JSON with 'username' and 'password'. If username is not found, the system will try the same value as a customer email; lastly it will try an explicit 'email' field if provided.",
+                "usage": "POST JSON with 'username' and 'password'.",
                 "required": ["password"],
                 "identifiers": ["username", "email"],
                 "examples": {
@@ -95,7 +88,6 @@ class LoginView(APIView):
         )
 
     def post(self, request):
-        # Read only the keys we care about; ignore any extras
         try:
             data = request.data if isinstance(request.data, dict) else {}
         except ParseError:
@@ -105,39 +97,39 @@ class LoginView(APIView):
         email = data.get("email")
         password = data.get("password")
 
-        # Require password and at least one identifier
         if not password or not (username or email):
             return Response(
                 {"approved": False, "error": {"detail": "Provide 'password' and either 'username' or 'email'"}},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Username-first lookup; then try the username value as an email in customers;
-        # only then fall back to explicit email field if provided
         try:
             user = None
             if username:
                 user = User.objects(username=username).first()
-            # If no user by username, treat the provided username as an email and
-            # try to resolve via customers collection
+
             if not user and username:
                 try:
-                    cust = Customer.objects(__raw__={"email": {"$regex": f"^{username}$", "$options": "i"}}).first()
+                    cust = Customer.objects(
+                        __raw__={"Email": {"$regex": f"^{username}$", "$options": "i"}}
+                    ).first()
                 except Exception:
                     cust = None
                 if cust:
                     user = User.objects(userid=getattr(cust, "UserID", None)).first()
-            # Finally, if still not found and a separate email field was provided, try that
+
             if not user and email:
                 try:
-                    # Resolve user via customers collection using authoritative email
-                    cust = Customer.objects(__raw__={"email": {"$regex": f"^{email}$", "$options": "i"}}).first()
+                    cust = Customer.objects(
+                        __raw__={"Email": {"$regex": f"^{email}$", "$options": "i"}}
+                    ).first()
                 except Exception:
                     cust = None
                 if cust:
                     user = User.objects(userid=getattr(cust, "UserID", None)).first()
         except Exception as e:
-            return Response({"approved": False, "error": "Database connection error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"approved": False, "error": "Database connection error"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if not user:
             return Response({"approved": False, "error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
@@ -145,12 +137,10 @@ class LoginView(APIView):
         if not user.isEnabled:
             return Response({"approved": False, "error": "Account is disabled"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Check password (supports transitional plaintext hashes in DB)
         if not user.check_password(password):
             return Response({"approved": False, "error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
         role_name = user.role_name or _role_name_for(user.roleID)
-        # Fetch email from customers collection using userID
         cust_email = None
         try:
             cust = Customer.objects(UserID=user.userid).first()
@@ -181,18 +171,20 @@ class LoginView(APIView):
 
 class CreateAccountView(APIView):
     """
-    Register a new account after validating policy and email ownership.
+    Explanation: Registers a new user account linked to an existing Customer Plan.
+    Expected Input: JSON Body { "email": str, "username": str, "customerPlanID": int, "password": str }.
+    Expected Output: JSON object with created user details.
     """
 
     def get(self, request):
-        """Describe how to create an account."""
         return Response(
             {
                 "endpoint": "/api/auth/create-account/",
                 "methods": ["POST"],
-                "usage": "POST JSON with 'email', 'username', 'customerPlanID', and 'password'. Email is validated against the customers record for that policy.",
+                "usage": "POST JSON with 'email', 'username', 'customerPlanID', and 'password'.",
                 "required": ["email", "username", "customerPlanID", "password"],
-                "example": {"email": "customer@example.com", "username": "newuser", "customerPlanID": 123, "password": "ChooseAStrongPassword"},
+                "example": {"email": "customer@example.com", "username": "newuser", "customerPlanID": 123,
+                            "password": "ChooseAStrongPassword"},
             },
             status=status.HTTP_200_OK,
         )
@@ -202,19 +194,15 @@ class CreateAccountView(APIView):
         if not serializer.is_valid():
             return Response({"created": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Normalize inputs
         raw_email = serializer.validated_data["email"]
         email = (raw_email or "").strip()
         email_lower = email.lower()
         username = serializer.validated_data["username"].strip()
-        plan_id = int(serializer.validated_data["customerPlanID"])  # ensure int
+        plan_id = int(serializer.validated_data["customerPlanID"])
         password = serializer.validated_data["password"]
 
-        # Step 1: find plan -> resolve owning customerID
         try:
-            # Primary path: field exactly as modeled (CustomerPlanID)
             plan = CustomerPlan.objects(CustomerPlanID=plan_id).first()
-            # Fallbacks: handle inconsistent field casing or string-typed ids in the DB
             if not plan:
                 plan = CustomerPlan.objects(__raw__={
                     "$or": [
@@ -237,7 +225,6 @@ class CreateAccountView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Step 2: fetch customer by CustomerID from plan
         try:
             customer = Customer.objects(CustomerID=plan.CustomerID).first()
         except Exception as e:
@@ -252,7 +239,7 @@ class CreateAccountView(APIView):
                 {"created": False, "error": "Customer not found for plan"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        # Compare emails case-insensitively
+
         try:
             cust_email = (getattr(customer, "Email", None) or "").strip()
             if cust_email.lower() != email_lower:
@@ -262,7 +249,9 @@ class CreateAccountView(APIView):
                 )
         except Exception as e:
             print(f"CreateAccountView: error validating customer email: {e}")
-            return Response({"created": False, "error": "Database connection error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"created": False, "error": "Database connection error"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         if not isinstance(getattr(customer, "UserID", None), int):
             return Response(
                 {"created": False, "error": "Customer record is missing a userID"},
@@ -270,7 +259,6 @@ class CreateAccountView(APIView):
             )
 
         try:
-            # Uniqueness checks
             if User.objects(userid=customer.UserID).first():
                 return Response(
                     {"created": False, "error": "An account already exists for this policy"},
@@ -281,7 +269,6 @@ class CreateAccountView(APIView):
                     {"created": False, "error": "Username already exists"},
                     status=status.HTTP_409_CONFLICT,
                 )
-            # Do not check User.email; authoritative email lives in customers
 
             new_user = User(
                 userid=customer.UserID,
@@ -314,33 +301,21 @@ class CreateAccountView(APIView):
 
 class ForgotPasswordView(APIView):
     """
-    Request a password reset token. Always returns 200 to avoid user enumeration.
-    Accepts JSON: { "identifier" | "email" | "username" }
-    Sends an email with a reset link or token if the user exists and has an email.
+    Explanation: Initiates password reset process. Sends token via email if user exists.
+    Expected Input: JSON Body { "identifier" | "email" | "username" }.
+    Expected Output: JSON message (Always 200 OK for security).
     """
 
     def _extract_identifier(self, request) -> str | None:
-        """Try hard to extract an identifier (email or username) from various body formats.
-
-        Supports:
-        - Proper JSON (Content-Type: application/json)
-        - Malformed JSON bodies that trip DRF's JSON parser (fallback to raw parse)
-        - application/x-www-form-urlencoded (identifier=..., email=..., username=...)
-        - Plain text body containing just the email/username
-        - Query string ?identifier=... (last resort)
-        """
-        # 1) Try DRF-parsed data first
         try:
-            data = request.data  # may raise ParseError if Content-Type says JSON but it's malformed
+            data = request.data
             if isinstance(data, dict):
                 ident = data.get("identifier") or data.get("email") or data.get("username")
                 if ident:
                     return ident
         except ParseError:
-            # We'll try raw parsing below
             pass
 
-        # 2) Try raw body
         try:
             raw = request.body or b""
             if not raw:
@@ -351,7 +326,6 @@ class ForgotPasswordView(APIView):
             else:
                 raw_text = str(raw).strip()
 
-            # If it looks like JSON, try to parse
             if raw_text.startswith("{") and raw_text.endswith("}"):
                 try:
                     obj = json.loads(raw_text)
@@ -362,11 +336,10 @@ class ForgotPasswordView(APIView):
                 except Exception:
                     pass
 
-            # If it looks like form-encoded (a=b&c=d)
-            if "=" in raw_text and "&" in raw_text or raw_text.startswith("identifier=") or raw_text.startswith("email=") or raw_text.startswith("username="):
+            if "=" in raw_text and "&" in raw_text or raw_text.startswith("identifier=") or raw_text.startswith(
+                    "email=") or raw_text.startswith("username="):
                 try:
                     q = parse_qs(raw_text, keep_blank_values=True)
-                    # parse_qs returns lists
                     for key in ("identifier", "email", "username"):
                         vals = q.get(key)
                         if vals and vals[0]:
@@ -374,15 +347,13 @@ class ForgotPasswordView(APIView):
                 except Exception:
                     pass
 
-            # As a last resort, if body is just the identifier itself
             if raw_text:
                 return raw_text
         except Exception:
             pass
 
-        # 3) Try query params
         try:
-            qp = request.query_params  # type: ignore[attr-defined]
+            qp = request.query_params
             ident = qp.get("identifier") or qp.get("email") or qp.get("username")
             if ident:
                 return ident
@@ -392,12 +363,11 @@ class ForgotPasswordView(APIView):
         return None
 
     def get(self, request):
-        """Describe how to request a password reset token."""
         return Response(
             {
                 "endpoint": "/api/auth/forgot-password/",
                 "methods": ["POST"],
-                "usage": "POST JSON with one of 'identifier', 'email', or 'username'. A reset token will be issued if the account exists.",
+                "usage": "POST JSON with one of 'identifier', 'email', or 'username'.",
                 "identifiers": ["identifier", "email", "username"],
                 "example": {"identifier": "john.doe"},
                 "note": "For development, the reset token and link are printed to the server console.",
@@ -406,27 +376,22 @@ class ForgotPasswordView(APIView):
         )
 
     def post(self, request):
-        # First, try to use the serializer with whatever data we can extract
         payload = {}
         ident = self._extract_identifier(request)
         if ident:
             payload = {"identifier": ident}
         else:
-            # If we truly cannot parse anything, return generic 200 to avoid enumeration
             return Response({"message": "If an account exists, an email has been sent."}, status=status.HTTP_200_OK)
 
         serializer = ForgotPasswordSerializer(data=payload)
         if not serializer.is_valid():
-            # Still return 200 to avoid enumeration; include generic message
             return Response({"message": "If an account exists, an email has been sent."}, status=status.HTTP_200_OK)
 
         ident = serializer.validated_data["identifier"]
         try:
-            # Attempt by email first using customers collection, else by username
             user = None
             customer = None
             if isinstance(ident, str) and "@" in ident:
-                # Find customer by email (case-insensitive)
                 customer = Customer.objects(__raw__={"email": {"$regex": f"^{ident}$", "$options": "i"}}).first()
                 if customer:
                     user = User.objects(userid=getattr(customer, "UserID", None)).first()
@@ -438,37 +403,30 @@ class ForgotPasswordView(APIView):
                     except Exception:
                         customer = None
         except Exception:
-            # Do not reveal errors here; return generic response
             return Response({"message": "If an account exists, an email has been sent."}, status=status.HTTP_200_OK)
 
-        # If user exists, issue a token regardless of email setup and print it to console for development convenience
         if user:
             try:
                 token = user.issue_reset_token(ttl_minutes=60)
             except Exception:
                 token = None
 
-            # Build a reset link. Prefer PASSWORD_RESET_BASE_URL if configured; otherwise fall back to a fully-qualified URL using the current host.
             try:
                 link = None
                 base = getattr(settings, "PASSWORD_RESET_BASE_URL", "") or ""
                 if token:
                     if base:
                         base = str(base).strip()
-                        # If developer provided a template with {token}, honor it directly
                         if "{token}" in base:
                             link = base.format(token=token)
                         else:
-                            # If base already contains a query string, append using &token=
                             if "?" in base:
                                 sep = "&" if not base.endswith(("&", "?")) else ""
                                 link = f"{base}{sep}token={token}"
                             else:
-                                # Normalize trailing slash then add ?token=
                                 base_norm = base.rstrip("/")
                                 link = f"{base_norm}?token={token}"
                     else:
-                        # Fallback: build absolute URL from the incoming request
                         try:
                             reset_url = request.build_absolute_uri("/api/auth/reset-password/")
                         except Exception:
@@ -480,7 +438,6 @@ class ForgotPasswordView(APIView):
             except Exception:
                 link = None
 
-            # Always print token (and link if available) to server console so you can copy it without email set up
             if token:
                 try:
                     uname = getattr(user, "username", "<unknown>")
@@ -495,7 +452,6 @@ class ForgotPasswordView(APIView):
                 except Exception:
                     pass
 
-            # Send reset email to the customer's email if available
             if customer and getattr(customer, "Email", None) and token:
                 try:
                     subject = "Password reset request"
@@ -515,12 +471,12 @@ class ForgotPasswordView(APIView):
                     send_mail(
                         subject,
                         message,
-                        getattr(settings, "DEFAULT_FROM_EMAIL", None) or getattr(settings, "EMAIL_HOST_USER", None) or "no-reply@localhost",
+                        getattr(settings, "DEFAULT_FROM_EMAIL", None) or getattr(settings, "EMAIL_HOST_USER",
+                                                                                 None) or "no-reply@localhost",
                         [getattr(customer, "Email")],
                         fail_silently=True,
                     )
                 except Exception:
-                    # Swallow errors to avoid exposing user info
                     pass
 
         return Response({"message": "If an account exists, an email has been sent."}, status=status.HTTP_200_OK)
@@ -528,7 +484,9 @@ class ForgotPasswordView(APIView):
 
 class CustomerPlansView(APIView):
     """
-    Return all plans for the customer associated with a given userID.
+    Explanation: Returns all plans for a specific customer.
+    Expected Input: URL Query param 'userID'.
+    Expected Output: JSON object containing list of plans.
     """
 
     def get(self, request):
@@ -540,7 +498,6 @@ class CustomerPlansView(APIView):
         except ValueError:
             return Response({"error": "userID must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Resolve customer by userID
         try:
             customer = Customer.objects(UserID=user_id).first()
         except Exception as e:
@@ -552,7 +509,6 @@ class CustomerPlansView(APIView):
         if not customer:
             return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Fetch plans for this customer
         try:
             plans = CustomerPlan.objects(CustomerID=customer.CustomerID)
         except Exception as e:
@@ -562,17 +518,10 @@ class CustomerPlansView(APIView):
             return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         def _get(plan, *keys):
-            """
-            Safely pull a value from a MongoEngine document that may have
-            varying field names/casing or be present only in _data because
-            the model doesn't declare the field.
-            """
             for k in keys:
-                # direct attribute
                 val = getattr(plan, k, None)
                 if val is not None:
                     return val
-                # raw data fallback when strict=False
                 if hasattr(plan, "_data") and k in plan._data:
                     val = plan._data.get(k)
                     if val is not None:
@@ -594,7 +543,6 @@ class CustomerPlansView(APIView):
 
         plans_list = [_plan_to_dict(p) for p in plans]
 
-        # Enrich with plan names from insurancePlans
         plan_ids = {p.get("planID") for p in plans_list if p.get("planID") is not None}
         plan_names = {}
         if plan_ids:
@@ -625,22 +573,15 @@ class CustomerPlansView(APIView):
 
 class SubmitClaimView(APIView):
     """
-    Customer claim submission.
-    - Validates that the userID maps to a customer.
-    - Validates that the policy (customerPlanID) belongs to that customer.
-    - Validates that the item belongs to that customer.
-    - Creates a claim in claimedItems with status = Filed (CurrentStatusID = 1).
-    - Marks the item as in-progress (sets ClaimStatus = 'In Progress').
+    Explanation: Creates a new claim submission for a policy or item.
+    Expected Input: JSON Body { "userID", "policyID", "amount", "reason", "itemID" (optional) }.
+    Expected Output: JSON object with created claim details.
     """
 
     def _validate_client_path(self, path_value):
-        """
-        Very basic validation to ensure client-provided paths are relative and safe.
-        """
         if not path_value or not isinstance(path_value, str):
             return None
         path_value = path_value.strip()
-        # Reject absolute paths or traversal attempts
         if path_value.startswith(("/", "\\")) or ".." in path_value:
             return None
         return path_value or None
@@ -648,7 +589,6 @@ class SubmitClaimView(APIView):
     def post(self, request):
         data = request.data if isinstance(request.data, dict) else {}
 
-        # Accept flexible keys from clients (camelCase/snake_case/mixed) and header fallback for userID
         headers = getattr(request, "headers", {}) or {}
         meta = getattr(request, "META", {}) or {}
 
@@ -658,19 +598,18 @@ class SubmitClaimView(APIView):
                     return dct[k]
             return default
 
-        # userID: prefer body but allow header fallbacks like x-user-id
         raw_user = _get_first(
             data,
             ["userID", "userid", "UserID", "customer_id", "customerID"],
         )
         if raw_user in (None, ""):
             raw_user = (
-                headers.get("x-user-id")
-                or headers.get("X-User-ID")
-                or headers.get("userid")
-                or headers.get("UserID")
-                or meta.get("HTTP_X_USER_ID")
-                or meta.get("HTTP_USERID")
+                    headers.get("x-user-id")
+                    or headers.get("X-User-ID")
+                    or headers.get("userid")
+                    or headers.get("UserID")
+                    or meta.get("HTTP_X_USER_ID")
+                    or meta.get("HTTP_USERID")
             )
 
         raw_policy = _get_first(
@@ -685,17 +624,14 @@ class SubmitClaimView(APIView):
                 "planId",
             ],
         )
-        # itemID is optional to allow policy-level claim submission from UI that doesn't select an item yet
-        raw_item = _get_first(data, ["itemID", "itemId", "ItemID"]) 
-        raw_amount = _get_first(data, ["amount", "Amount", "claimAmount", "ClaimAmount"]) 
+        raw_item = _get_first(data, ["itemID", "itemId", "ItemID"])
+        raw_amount = _get_first(data, ["amount", "Amount", "claimAmount", "ClaimAmount"])
         raw_reason = _get_first(data, ["reason", "Reason", "description", "claimReason", "notes"]) or ""
-        loss_date = _get_first(data, ["lossDate", "loss_date", "LossDate"])  # optional; accept ISO string
+        loss_date = _get_first(data, ["lossDate", "loss_date", "LossDate"])
 
-        # Validate presence
         missing = []
         if raw_user in (None, ""): missing.append("userID")
         if raw_policy in (None, ""): missing.append("policyID")
-        # itemID is optional; do not mark as missing
         if raw_amount in (None, ""): missing.append("amount")
         if raw_reason in (None, ""): missing.append("reason")
         if missing:
@@ -706,7 +642,8 @@ class SubmitClaimView(APIView):
                         "missing": missing,
                         "acceptedKeys": {
                             "userID": ["userID", "userid", "UserID", "x-user-id (header)"],
-                            "policyID": ["policyID", "policyId", "customerPlanID", "customerPlanId", "planID", "planId"],
+                            "policyID": ["policyID", "policyId", "customerPlanID", "customerPlanId", "planID",
+                                         "planId"],
                             "itemID": ["itemID", "itemId"],
                             "amount": ["amount", "Amount", "claimAmount", "ClaimAmount"],
                             "reason": ["reason", "Reason", "description", "claimReason", "notes"],
@@ -716,25 +653,23 @@ class SubmitClaimView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Coerce types
         try:
             user_id = int(str(raw_user).strip())
             policy_id = int(str(raw_policy).strip())
         except (ValueError, TypeError):
             return Response({"error": "userID and policyID must be integers"}, status=status.HTTP_400_BAD_REQUEST)
-        # item_id optional
+
         item_id = None
         if raw_item not in (None, ""):
             try:
                 item_id = int(str(raw_item).strip())
             except (ValueError, TypeError):
-                return Response({"error": "itemID must be an integer when provided"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "itemID must be an integer when provided"},
+                                status=status.HTTP_400_BAD_REQUEST)
 
-        # Amount: accept strings with currency symbols/commas
         from decimal import Decimal as _Dec
         try:
             amt_str = str(raw_amount).strip()
-            # Remove common formatting: $  ,
             amt_clean = amt_str.replace("$", "").replace(",", "")
             amount = _Dec(amt_clean)
         except Exception:
@@ -742,7 +677,6 @@ class SubmitClaimView(APIView):
 
         reason = str(raw_reason).strip()
 
-        # Resolve customer by userID
         try:
             customer = Customer.objects(UserID=user_id).first()
         except Exception as e:
@@ -754,11 +688,9 @@ class SubmitClaimView(APIView):
         if not customer:
             return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate policy belongs to this customer
         try:
             policy = CustomerPlan.objects(CustomerID=customer.CustomerID, CustomerPlanID=policy_id).first()
             if not policy:
-                # fallback for mixed casing
                 policy = CustomerPlan.objects(__raw__={
                     "CustomerID": customer.CustomerID,
                     "$or": [
@@ -776,7 +708,6 @@ class SubmitClaimView(APIView):
         if not policy:
             return Response({"error": "Policy not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate item belongs to this customer (only if provided)
         item = None
         if item_id is not None:
             try:
@@ -792,7 +723,6 @@ class SubmitClaimView(APIView):
             if not item:
                 return Response({"error": "Item not found for this customer"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Prevent duplicate open claims on the same item (status Filed=1, In Review=2)
         if item_id is not None:
             try:
                 open_claim = ClaimRecord.objects(__raw__={
@@ -803,9 +733,9 @@ class SubmitClaimView(APIView):
                 open_claim = None
 
             if open_claim:
-                return Response({"error": "An open claim already exists for this item"}, status=status.HTTP_409_CONFLICT)
+                return Response({"error": "An open claim already exists for this item"},
+                                status=status.HTTP_409_CONFLICT)
 
-        # Generate next ClaimID (simple max+1)
         try:
             last = ClaimRecord.objects.order_by("-ClaimID").first()
             next_id = (last.ClaimID + 1) if last and getattr(last, "ClaimID", None) else 1
@@ -813,7 +743,6 @@ class SubmitClaimView(APIView):
             next_id = 1
 
         now = timezone.now()
-        # Normalize loss_date if provided
         loss_dt = None
         if loss_date:
             try:
@@ -821,12 +750,11 @@ class SubmitClaimView(APIView):
             except Exception:
                 loss_dt = None
 
-        # Create claim record
         try:
             claim = ClaimRecord(
                 ClaimID=next_id,
                 ItemID=item_id if item_id is not None else None,
-                CurrentStatusID=1,  # Filed
+                CurrentStatusID=1,
                 LossDate=loss_dt,
                 ClaimedValueAtTime=str(amount),
                 descriptionOfLoss=reason,
@@ -839,16 +767,13 @@ class SubmitClaimView(APIView):
                 msg = f"Create failed: {e}"
             return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Mark item as in-progress (add a field without strict schema enforcement)
         if item is not None:
             try:
                 setattr(item, "ClaimStatus", "In Progress")
                 item.save()
             except Exception:
-                # best effort; do not fail claim creation if item update fails
                 pass
 
-        # Log workflow history (Filed) with agent/employee name resolved from assignment
         try:
             agent_name = None
             agent_id = getattr(customer, "assignment", None) or getattr(customer, "Assignment", None)
@@ -858,7 +783,6 @@ class SubmitClaimView(APIView):
                     fn = getattr(ag, "firstname", None) or getattr(ag, "firstName", None)
                     ln = getattr(ag, "lastName", None) or getattr(ag, "lastname", None)
                     agent_name = " ".join(filter(None, [fn, ln])) or getattr(ag, "email", None)
-            # Generate next HistoryID
             try:
                 last_hist = ClaimWorkflowHistory.objects.order_by("-HistoryID").first()
                 next_hist = (last_hist.HistoryID + 1) if last_hist and getattr(last_hist, "HistoryID", None) else 1
@@ -874,7 +798,6 @@ class SubmitClaimView(APIView):
             )
             hist.save()
         except Exception:
-            # best effort; do not fail claim creation if history logging fails
             pass
 
         return Response(
@@ -895,14 +818,9 @@ class SubmitClaimView(APIView):
 
 class AddItemWithImagesView(APIView):
     """
-    Add an item (for a given customerPlanID) with up to two images.
-    - Uses customerPlanID and customerID to ensure ownership.
-    - Accepts multipart/form-data with fields:
-      name (required), estimatedValue (required), customerPlanID (required),
-      description (optional), Category (optional), purchaseDate (optional ISO),
-      image1 (optional), image2 (optional)
-    - Allowed image types: jpeg, png; max size: 10 MB each.
-    - Stores two image paths on the item document (ImagePath1, ImagePath2).
+    Explanation: Creates an Item under a specific policy, optionally handling up to 2 image uploads.
+    Expected Input: Multipart/Form Data { "name", "estimatedValue", "customerPlanID", "customerID", "image1", "image2", ... }.
+    Expected Output: JSON object with created item details.
     """
 
     parser_classes = [MultiPartParser, FormParser]
@@ -915,15 +833,32 @@ class AddItemWithImagesView(APIView):
         return text or "file"
 
     def _save_file(self, file_obj, customer_id, plan_id, item_name_slug, idx):
-        upload_root = os.environ.get("UPLOAD_ROOT") or getattr(settings, "UPLOAD_ROOT", None)
-        if not upload_root:
-            raise RuntimeError("UPLOAD_ROOT is not configured")
+        """
+        Save an uploaded file to a safe location.
 
-        # Validate size
+        We attempt several fallbacks for the root upload directory to avoid 500s
+        when a specific setting isn't provided in the environment:
+        1) ENV var UPLOAD_ROOT
+        2) settings.UPLOAD_ROOT
+        3) settings.MEDIA_ROOT (if set and non-empty)
+        4) <BASE_DIR>/uploads (created on demand)
+        """
+        upload_root = (
+            os.environ.get("UPLOAD_ROOT")
+            or getattr(settings, "UPLOAD_ROOT", None)
+            or getattr(settings, "MEDIA_ROOT", None)
+        )
+        # If MEDIA_ROOT is empty string or None, fall back to BASE_DIR/uploads
+        if not upload_root:
+            base_dir = getattr(settings, "BASE_DIR", Path.cwd())
+            upload_root = os.path.join(str(base_dir), "uploads")
+
+        # Ensure the root exists (avoid failing later with obscure errors)
+        os.makedirs(upload_root, exist_ok=True)
+
         if hasattr(file_obj, "size") and file_obj.size > self.MAX_SIZE:
             raise ValueError("File too large")
 
-        # Validate extension
         ext = Path(file_obj.name).suffix.lower()
         if ext not in self.ALLOWED_EXT:
             raise ValueError("Unsupported file type")
@@ -948,12 +883,11 @@ class AddItemWithImagesView(APIView):
             for chunk in file_obj.chunks():
                 out.write(chunk)
 
-        return rel_path  # relative to upload_root
+        return rel_path
 
     def post(self, request):
         data = request.data if isinstance(request.data, dict) else {}
 
-        # Required fields
         for field in ["name", "estimatedValue", "customerPlanID", "customerID"]:
             if field not in data or data[field] in (None, ""):
                 return Response({"error": {field: "This field is required"}}, status=status.HTTP_400_BAD_REQUEST)
@@ -975,7 +909,6 @@ class AddItemWithImagesView(APIView):
         except Exception:
             return Response({"error": {"estimatedValue": "Must be numeric"}}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Optional purchase date
         purchase_date_raw = data.get("purchaseDate")
         purchase_date = None
         if purchase_date_raw:
@@ -985,7 +918,6 @@ class AddItemWithImagesView(APIView):
                 return Response({"error": {"purchaseDate": "Invalid date format"}}, status=status.HTTP_400_BAD_REQUEST)
         purchase_date_str = purchase_date.isoformat() if purchase_date else None
 
-        # Validate policy exists (by plan_id) and matches the provided customerID
         try:
             policy = CustomerPlan.objects(__raw__={
                 "$or": [
@@ -1005,14 +937,12 @@ class AddItemWithImagesView(APIView):
         if getattr(policy, "CustomerID", None) != customer_id:
             return Response({"error": "customerID does not match plan ownership"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Generate next ItemID (max+1)
         try:
             last = Item.objects.order_by("-ItemID").first()
             next_id = (last.ItemID + 1) if last and getattr(last, "ItemID", None) else 1
         except Exception:
             next_id = 1
 
-        # Prepare image paths (either uploaded files or client-provided relative paths)
         image_paths = []
         for idx, field in enumerate(["image1", "image2"], start=1):
             file_obj = request.FILES.get(field)
@@ -1028,13 +958,11 @@ class AddItemWithImagesView(APIView):
                         msg = f"Upload error: {e}"
                     return Response({"error": msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             else:
-                # Allow optional client-provided path in JSON (already stored somewhere else)
                 client_path = self._validate_client_path(data.get(f"imagePath{idx}"))
                 if not client_path:
                     return Response({"error": {field: "Image is required"}}, status=status.HTTP_400_BAD_REQUEST)
                 image_paths.append(client_path)
 
-        # Create item (strict=False allows extra fields)
         try:
             item = Item(
                 ItemID=next_id,
@@ -1047,7 +975,6 @@ class AddItemWithImagesView(APIView):
                 PurchaseDate=purchase_date_str,
             )
             if image_paths:
-                # two slots: ImagePath1, ImagePath2
                 if len(image_paths) > 0:
                     setattr(item, "ImagePath1", image_paths[0])
                 if len(image_paths) > 1:
@@ -1078,13 +1005,13 @@ class AddItemWithImagesView(APIView):
 
 class PolicyDetailView(APIView):
     """
-    Get a specific policy (customerPlan) and all items linked to it.
-    URL: /api/auth/policies/<int:customerPlanID>/
+    Explanation: Returns a specific policy (CustomerPlan) and its associated items.
+    Expected Input: URL Param 'customerPlanID'.
+    Expected Output: JSON object with policy and items details.
     """
 
     def get(self, request, customerPlanID):
         plan_id = customerPlanID
-        # Fetch the policy (customerPlan)
         try:
             policy = CustomerPlan.objects(__raw__={
                 "$or": [
@@ -1113,7 +1040,6 @@ class PolicyDetailView(APIView):
                         return val
             return None
 
-        # Enrich with insurance plan info
         plan_id_field = _get(policy, "planID", "PlanID")
         plan_name = plan_desc = None
         coverage = base_price = None
@@ -1133,7 +1059,6 @@ class PolicyDetailView(APIView):
             except Exception:
                 pass
 
-        # Fetch items linked to this plan
         try:
             items = Item.objects(__raw__={
                 "$or": [
@@ -1188,11 +1113,12 @@ class PolicyDetailView(APIView):
 
 class ResetPasswordView(APIView):
     """
-    Reset the password using a valid token. Expects JSON: { "token", "new_password" }
+    Explanation: Resets the user's password using a valid token.
+    Expected Input: JSON Body { "token": str, "new_password": str }.
+    Expected Output: JSON message (Success).
     """
 
     def get(self, request):
-        """Describe how to reset a password with a token."""
         return Response(
             {
                 "endpoint": "/api/auth/reset-password/",

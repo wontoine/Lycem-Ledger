@@ -13,10 +13,12 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 from corsheaders.defaults import default_headers
-try:
-    from dotenv import load_dotenv
-except Exception:
-    load_dotenv = None
+from dotenv import load_dotenv
+from mongoengine import connect
+
+# -----------------------------------------------------------------------------
+# Base Configuration
+# -----------------------------------------------------------------------------
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,52 +29,57 @@ if load_dotenv is not None:
     if env_file.exists():
         load_dotenv(env_file)
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+# -----------------------------------------------------------------------------
+# Security & Debug Settings
+# -----------------------------------------------------------------------------
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# Read from environment; fallback only for local dev.
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-do-not-use")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
-# Allow both local development and Turing server
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'turing.cs.olemiss.edu',]
+# Configure Allowed Hosts
+# Reads from DJANGO_ALLOWED_HOSTS env var (comma-separated).
+# Defaults to localhost/127.0.0.1 for development if not set.
+_allowed_hosts_env = os.environ.get("DJANGO_ALLOWED_HOSTS", "").strip()
+if _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.replace(";", ",").split(",") if h.strip()]
+else:
+    # Safe defaults for local dev and university server
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', 'turing.cs.olemiss.edu']
+    # If DEBUG is off, ensure we have valid hosts to prevent CommandError
+    if not DEBUG and not ALLOWED_HOSTS:
+        ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
-# CORS configuration
-# Default to permissive CORS in development to avoid users seeing generic "Access denied" due to origin mismatch.
-# In production, set environment variables to restrict origins as needed.
+# -----------------------------------------------------------------------------
+# CORS (Cross-Origin Resource Sharing) Configuration
+# -----------------------------------------------------------------------------
+
+# Define which frontend origins can access this API.
 CORS_ALLOWED_ORIGINS = [
-    # Common local dev origins (Vite/React)
+    # Local development (Vite/React default ports)
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:3000",
+    "http://localhost:3003",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://127.0.0.1:3000",
-    # Turing server http (adjust if using https)
+    "http://127.0.0.1:3003",
+    # Staging / Production server
+    # Allow both HTTP and HTTPS for university server and explicit port 3003
     "http://turing.cs.olemiss.edu",
+    "http://turing.cs.olemiss.edu:3003",
 ]
 
-# If using cookies/session auth from the browser, enable credentials and trust CSRF origins
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "http://127.0.0.1:3000",
-    "http://turing.cs.olemiss.edu",
-]
 
+# Trusted origins for CSRF protection
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 
-# Allow custom headers used by the frontend (e.g., x-user-id) in CORS preflight
-# This fixes: "Request header field x-user-id is not allowed by Access-Control-Allow-Headers"
+# Allow custom headers used by the frontend (e.g., authentication tokens)
 CORS_ALLOW_HEADERS = list(default_headers) + [
-    # Custom and commonly used headers by our frontends/clients
     "x-user-id",
     "userID",
     "UserID",
@@ -82,29 +89,22 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "content-disposition",
 ]
 
-# Expose headers which clients may need to read programmatically
+# Expose headers that clients might need to read programmatically
 CORS_EXPOSE_HEADERS = [
     "x-user-id",
     "content-disposition",
 ]
 
-
-# During development or when explicitly enabled, relax CORS to avoid blocking legitimate users
-# You can set CORS_RELAXED=false in environment to disable this behavior.
+# Permissive CORS mode for development (Avoids strict blocking during testing)
 RELAXED_CORS = os.environ.get("CORS_RELAXED", "True").lower() in ("1", "true", "yes", "on")
 if DEBUG or RELAXED_CORS:
-    # Allow all origins while still allowing credentials by using regex matching of any http/https origin
-    # (Avoids sending '*' with credentials)
+    # Allow any HTTP/HTTPS origin (regex avoids wildcard issues with credentials)
     CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?://.*$"]
-    # Also allow private network requests from browsers that implement PNA
-    try:
-        # Available in django-cors-headers >= 4.1
-        CORS_ALLOW_PRIVATE_NETWORK = True  # type: ignore
-    except Exception:
-        pass
+    CORS_ALLOW_PRIVATE_NETWORK = True  # Supports local network requests
 
-
-# Application definition
+# -----------------------------------------------------------------------------
+# Application Definition
+# -----------------------------------------------------------------------------
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -118,8 +118,9 @@ INSTALLED_APPS = [
     "users",
     "corsheaders",
 ]
+
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # Must be near the top
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -148,44 +149,56 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "backend.wsgi.application"
 
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
 
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# Primary Data Store: MongoDB via MongoEngine
+# Connection logic supports both direct URI and discrete parameter configuration.
 
-# MongoDB connection for MongoEngine
-from mongoengine import connect
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Helper to parse boolean environment variables."""
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
 
-# Optionally start an SSH tunnel (for remote MongoDB) before connecting.
+_host = os.environ.get('MONGODB_HOST', 'localhost')
+_db = os.environ.get('MONGODB_DB', 'group3f25_db')
+_username = os.environ.get('MONGODB_USERNAME', '')
+_password = os.environ.get('MONGODB_PASSWORD', '')
+_auth_source = os.environ.get('MONGODB_AUTH_SOURCE', os.environ.get('MONGODB_DB', 'admin'))
+
+# Determine effective port (Default 27017 for standard MongoDB)
+_port_env = os.environ.get('MONGODB_PORT')
 try:
-    from .connection_ssh import ensure_ssh_tunnel_if_enabled
-    ensure_ssh_tunnel_if_enabled()
-except Exception as e:
-    print(f"SSH tunnel not started: {e}")
+    _port_effective = int(_port_env) if _port_env is not None else 27017
+except Exception:
+    _port_effective = 27017
 
-# MongoDB connection settings (dict-based)
+# Settings dictionary for discrete parameters
 MONGODB_SETTINGS = {
-    'host': os.environ.get('MONGODB_HOST', 'localhost'),
-    'port': int(os.environ.get('MONGODB_PORT', 27017)),
-    'db': os.environ.get('MONGODB_DB', 'group3f25_db'),
-    'username': os.environ.get('MONGODB_USERNAME', ''),
-    'password': os.environ.get('MONGODB_PASSWORD', ''),
-    # When users are defined in a specific database
-    'authentication_source': os.environ.get('MONGODB_AUTH_SOURCE', os.environ.get('MONGODB_DB', 'admin')),
+    'host': _host,
+    'port': _port_effective,
+    'db': _db,
+    'username': _username,
+    'password': _password,
+    'authentication_source': _auth_source,
 }
 
-
+# Optional direct connection URI override
 MONGODB_URI = os.environ.get('MONGODB_URI', None)
 
-# Connect to MongoDB (with ping verification)
+# Establish connection
 try:
     if MONGODB_URI:
         connect(host=MONGODB_URI, alias='default')
     else:
         connect(**MONGODB_SETTINGS)
 
-    # Verify the connection by pinging the server
+    # Health check: Ping the server to ensure connectivity
     try:
-        from mongoengine.connection import get_connection  # type: ignore
+        from mongoengine.connection import get_connection
         _conn = get_connection(alias='default')
         _conn.admin.command('ping')
         print("✅ MongoDB ping succeeded; connection is healthy")
@@ -193,9 +206,10 @@ try:
         raise RuntimeError(f"MongoDB ping failed: {ping_err}")
 except Exception as e:
     print(f"⚠️ MongoDB connection failed: {e}")
-    print("App will continue but MongoDB features won't work")
+    print("App will continue but MongoDB features (Users, Claims) won't work.")
 
-# Keep SQLite for Django's built-in features (admin, sessions, etc.)
+# Secondary Data Store: SQLite
+# Retained for Django's internal features (Admin, Sessions, Auth, ContentTypes)
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -203,50 +217,39 @@ DATABASES = {
     }
 }
 
+# -----------------------------------------------------------------------------
+# Password & Authentication
+# -----------------------------------------------------------------------------
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-
+# Use Argon2 for secure password hashing
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.Argon2PasswordHasher',
 ]
 
-# Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
+# -----------------------------------------------------------------------------
+# Internationalization & Static Files
+# -----------------------------------------------------------------------------
 
 LANGUAGE_CODE = "en-us"
-
 TIME_ZONE = "UTC"
-
 USE_I18N = True
-
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
-
 STATIC_URL = "static/"
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# REST Framework settings
+# -----------------------------------------------------------------------------
+# Third-Party & Custom Settings
+# -----------------------------------------------------------------------------
+
+# Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
@@ -256,17 +259,11 @@ REST_FRAMEWORK = {
     ],
 }
 
-# Company domain configuration (used to classify employee vs. customer)
+# Company Configuration
+# Domain used to auto-classify users as 'employee' or 'customer' during login
 COMPANY_EMAIL_DOMAIN = os.environ.get("COMPANY_EMAIL_DOMAIN", "lyceum-ledgers.com")
 
-# Email (SMTP) configuration
-# These should be set via environment variables or a local .env file.
-# Example for Gmail (App Password required):
-# EMAIL_HOST=smtp.gmail.com
-# EMAIL_PORT=587
-# EMAIL_USE_TLS=True
-# EMAIL_HOST_USER=your_account@gmail.com
-# EMAIL_HOST_PASSWORD=your_app_password
+# Email Backend Configuration (SMTP)
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
@@ -276,14 +273,6 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@lyceum-ledgers.com")
 
-# Base URL for password reset links sent to users.
-# If you have a frontend, set this to something like
-# https://app.example.com/reset-password?token=
+# Password Reset URL
+# Used in email templates to direct users to the frontend reset page
 PASSWORD_RESET_BASE_URL = os.environ.get("PASSWORD_RESET_BASE_URL", "")
-
-# For production deployment on Turing server (turing.cs.olemiss.edu)
-# You'll need to update these when deploying:
-# - DEBUG = False
-# - SECRET_KEY = 'your-production-secret-key'
-# - DATABASES = { your production database settings }
-# - ALLOWED_HOSTS = ['turing.cs.olemiss.edu']

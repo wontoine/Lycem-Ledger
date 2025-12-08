@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { apiUrl } from "../lib/api";
 
 function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
   // Resolve customerPlanID from various possible shapes
@@ -49,7 +50,7 @@ function SubmitClaimModal({ onClose, userID, selectedPolicy }) {
     };
 
     // Corrected URL matching urls.py path("api/claims/", ...)
-    const API_URL = "http://127.0.0.1:8000/api/claims/";
+    const API_URL = apiUrl("/api/claims/");
 
     try {
       const response = await fetch(API_URL, {

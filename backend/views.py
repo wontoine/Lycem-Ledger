@@ -1,4 +1,4 @@
-# Simple API views for testing
+# Simple API views for testing and basic authentication
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -9,7 +9,9 @@ from users.models import User, Role, Customer
 
 class HelloWorldView(APIView):
     """
-    Simple test endpoint to make sure Django REST Framework is working
+    Explanation: Basic connectivity endpoint to verify the API is reachable and DRF is configured.
+    Expected Input: GET request (no parameters).
+    Expected Output: JSON object with status message (HTTP 200).
     """
 
     def get(self, request):
@@ -22,17 +24,18 @@ class HelloWorldView(APIView):
 
 class LoginView(APIView):
     """
-    Login endpoint using MongoEngine User documents.
-    Accepts either username or email for login.
+    Explanation: Authenticates a user. Supports login via 'username' or 'email'.
+                 Checks against MongoEngine User documents and validates passwords.
+    Expected Input: JSON Body { "username": str (optional), "email": str (optional), "password": str }.
+    Expected Output: JSON object containing user details and role info (HTTP 200), or error (HTTP 400/401).
     """
 
     def post(self, request):
-        # Accept either 'username' or 'email' field
         username = request.data.get('username')
         email = request.data.get('email')
         password = request.data.get('password')
 
-        # User must provide either username or email
+        # Validation: Ensure password and at least one identifier are present
         if not (username or email):
             return Response({
                 'error': 'Username or email is required'
@@ -43,28 +46,35 @@ class LoginView(APIView):
                 'error': 'Password is required'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Find user by username or by customer email (authoritative)
         try:
             user = None
             cust_email = None
+
+            # Strategy 1: Look up by username directly in User collection
             if username:
                 user = User.objects(username=username).first()
                 if user:
                     try:
+                        # Fetch associated email from Customer record
                         cust = Customer.objects(UserID=user.userid).first()
                         if cust:
                             cust_email = getattr(cust, 'Email', None)
                     except Exception:
                         cust_email = None
+
+            # Strategy 2: If not found or only email provided, look up in Customer collection
             else:
-                # Look up customer by email, then map to user via UserID
                 try:
+                    # Regex used for case-insensitive email match
                     cust = Customer.objects(__raw__={"email": {"$regex": f"^{email}$", "$options": "i"}}).first()
                 except Exception:
                     cust = None
+
                 if cust:
                     cust_email = getattr(cust, 'Email', None)
+                    # Resolve back to User via UserID
                     user = User.objects(userid=getattr(cust, 'UserID', None)).first()
+
         except Exception as e:
             return Response({
                 'error': 'Database connection error'
@@ -80,7 +90,7 @@ class LoginView(APIView):
                 'error': 'Account is disabled'
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Check password
+        # Uses the model's check_password method (supports legacy hashes and Argon2)
         if not user.check_password(password):
             return Response({
                 'error': 'Invalid credentials'
@@ -92,9 +102,9 @@ class LoginView(APIView):
                 'userid': user.userid,
                 'username': user.username,
                 'email': cust_email,
-                # Provide both role name and numeric ID sourced from MongoDB
+                # Returns both readable role name and numeric ID for frontend logic
                 'role': user.role_name,
-                'accountType': user.role_name,  # alias expected by some frontend code
+                'accountType': user.role_name,
                 'roleID': getattr(user, 'roleID', None),
                 'isEnabled': user.isEnabled
             }
@@ -103,12 +113,14 @@ class LoginView(APIView):
 
 class HealthCheckView(APIView):
     """
-    Health check endpoint to verify MongoDB connection
+    Explanation: Diagnostics endpoint to verify the backend can connect to the MongoDB database.
+    Expected Input: GET request.
+    Expected Output: JSON object with database connection status and document counts (HTTP 200) or error (HTTP 500).
     """
 
     def get(self, request):
         try:
-            # Test MongoDB connection
+            # Perform a simple read operation to verify DB connectivity
             user_count = User.objects.count()
             role_count = Role.objects.count()
 

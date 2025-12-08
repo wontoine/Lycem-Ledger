@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from "react";
+import { apiUrl } from "../lib/api";
 import { useNavigate } from "react-router-dom";
 
 // --- Helper: Status Badge Component ---
+// Displays a colored badge based on the status of a claim (e.g., Pending, Approved, Rejected).
 const StatusBadge = ({ status }) => {
   const s = (status || "").toLowerCase();
-  let colorClass = "bg-blue-100 text-blue-700"; // default/submitted
+  let colorClass = "bg-blue-100 text-blue-700"; // Default for 'submitted' or unknown statuses
 
   if (s === "accepted" || s === "approved") {
     colorClass = "bg-green-100 text-green-700";
   } else if (s === "rejected" || s === "denied") {
     colorClass = "bg-red-100 text-red-700";
   } else if (s === "pending" || s === "in_review") {
+    // Specifically handle 'in_review' to indicate intermediate agent approval
     colorClass = "bg-yellow-100 text-yellow-700";
   }
 
@@ -24,6 +27,7 @@ const StatusBadge = ({ status }) => {
 };
 
 // --- Helper: Date Formatter ---
+// Converts ISO date strings into a readable format (e.g., "Nov 13, 2025, 02:30 PM").
 const formatDate = (dateString) => {
   if (!dateString) return "N/A";
   return new Date(dateString).toLocaleString("en-US", {
@@ -36,13 +40,15 @@ const formatDate = (dateString) => {
 };
 
 // --- Component: Claim Details Modal ---
+// A modal pop-up that shows detailed information about a specific claim, including
+// the approval workflow status from both the Agent and the Manager.
 const ClaimDetailsModal = ({ claim, onClose }) => {
   if (!claim) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
+        {/* Modal Header */}
         <div className="bg-blue-600 p-6 flex justify-between items-start text-white shrink-0">
           <div>
             <h2 className="text-2xl font-bold">Claim Details</h2>
@@ -58,9 +64,9 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
           </button>
         </div>
 
-        {/* Scrollable Content */}
+        {/* Scrollable Content Area */}
         <div className="p-6 overflow-y-auto space-y-6">
-          {/* Top Row: Key Info */}
+          {/* Top Row: Status and Amount summary */}
           <div className="grid grid-cols-2 gap-4">
             <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
               <label className="text-xs font-bold text-gray-400 uppercase">
@@ -80,7 +86,7 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
             </div>
           </div>
 
-          {/* Policy & IDs */}
+          {/* Identification Numbers (Plan, Policy, Customer) */}
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase">
@@ -108,7 +114,7 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
             </div>
           </div>
 
-          {/* Reason */}
+          {/* Description of the incident */}
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
               Reason for Claim
@@ -118,7 +124,7 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
             </div>
           </div>
 
-          {/* Timeline */}
+          {/* Timeline information */}
           <div className="border-t pt-4">
             <h3 className="text-sm font-bold text-gray-800 mb-3">Timeline</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -133,14 +139,14 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
             </div>
           </div>
 
-          {/* Approval Workflow Details */}
+          {/* Internal Review Details (Agent vs Manager decisions) */}
           {(claim.agentApprovalStatus || claim.managerApprovalStatus) && (
             <div className="border-t pt-4">
               <h3 className="text-sm font-bold text-gray-800 mb-3">
                 Review Details
               </h3>
               <div className="space-y-3">
-                {/* Agent Review */}
+                {/* Agent Decision Block */}
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
                   <div className="min-w-[4rem] font-bold text-xs text-blue-800 uppercase mt-1">
                     Agent
@@ -161,7 +167,7 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
                   </div>
                 </div>
 
-                {/* Manager Review */}
+                {/* Manager Decision Block */}
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-purple-50 border border-purple-100">
                   <div className="min-w-[4rem] font-bold text-xs text-purple-800 uppercase mt-1">
                     Manager
@@ -191,7 +197,7 @@ const ClaimDetailsModal = ({ claim, onClose }) => {
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer Action Buttons */}
         <div className="p-4 bg-gray-50 border-t flex justify-end">
           <button
             onClick={onClose}
@@ -211,6 +217,8 @@ function UserClaimsPage() {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // State for the modal popup
   const [selectedClaim, setSelectedClaim] = useState(null);
 
   const navigate = useNavigate();
@@ -226,17 +234,19 @@ function UserClaimsPage() {
     navigate("/");
   };
 
+  // Redirect to login if not authenticated
   useEffect(() => {
     if (!storedUserID) {
       navigate("/");
       return;
     }
 
+    // Fetch claims specifically for this user
     const fetchClaims = async () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch("http://127.0.0.1:8000/api/claims/", {
+        const response = await fetch(apiUrl("/api/claims/"), {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -263,7 +273,7 @@ function UserClaimsPage() {
 
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
-      {/* Sidebar */}
+      {/* Sidebar Navigation */}
       <div
         className={`fixed bg-white w-64 h-screen shadow-2xl transition-transform duration-300 ease-in-out z-40 flex flex-col ${
           sidebaropen ? "translate-x-0" : "-translate-x-full"
@@ -310,7 +320,7 @@ function UserClaimsPage() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto h-screen flex flex-col">
         <header className="sticky top-0 bg-white flex justify-between items-center p-4 shadow-md z-30">
           <button

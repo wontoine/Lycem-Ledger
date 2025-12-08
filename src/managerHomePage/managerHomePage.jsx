@@ -1,21 +1,26 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiUrl } from "../lib/api";
 
 function ManagerHomePage() {
   const [sidebaropen, setSidebaropen] = useState(false);
   const [activeTab, setActiveTab] = useState("approvals");
 
-  // State for Policy Management (Approvals & Assignments) and Agent oversight
+  // State: Management of policy approvals, agent teams, and assignments
   const [pendingPolicies, setPendingPolicies] = useState([]);
   const [agents, setAgents] = useState([]);
   const [allPolicies, setAllPolicies] = useState([]);
   const [customerPlans, setCustomerPlans] = useState([]);
+
+  // State: UI feedback for loading and errors
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
+
+  // State: Prevents duplicate submissions and tracks assignment dropdowns
   const [processingId, setProcessingId] = useState(null);
   const [assignmentSelections, setAssignmentSelections] = useState({});
 
-  // State specifically for the Claims Review workflow
+  // State: New Claims Review workflow
   const [claims, setClaims] = useState([]);
   const [decisionNotes, setDecisionNotes] = useState({});
   const [decisionBusy, setDecisionBusy] = useState({});
@@ -23,14 +28,14 @@ function ManagerHomePage() {
   const navigate = useNavigate();
   const storedUserID = localStorage.getItem("userID");
 
-  // Redirect to login if no user session is found
+  // Guard: Redirect to login if session is missing
   useEffect(() => {
     if (!storedUserID) {
       navigate("/", { replace: true });
     }
   }, [storedUserID, navigate]);
 
-  // Sidebar navigation configuration (Icons removed as requested)
+  // Configuration: Sidebar navigation items (text-only)
   const navItems = [
     { id: "approvals", name: "Pending Policies" },
     { id: "claims", name: "Claim Reviews" },
@@ -44,7 +49,7 @@ function ManagerHomePage() {
     navigate("/", { replace: true });
   };
 
-  // Fetches all required data for the dashboard in parallel
+  // Data Fetching: Loads all dashboard data in parallel
   const fetchData = async () => {
     if (!storedUserID) return;
 
@@ -57,23 +62,19 @@ function ManagerHomePage() {
         "x-user-id": String(storedUserID),
       };
 
-      // Execute all API requests simultaneously to reduce loading time
+      // Concurrent requests for policies, agents, assignments, and claims
       const [pendingRes, agentsRes, allPolRes, claimsRes] = await Promise.all([
-        // 1. Policies waiting for approval
-        fetch("http://127.0.0.1:8000/api/manager/policies/pending/", { headers }).catch(e => ({ ok: false })),
-        // 2. List of agents reporting to this manager
-        fetch("http://127.0.0.1:8000/api/manager/employees/", { headers }).catch(e => ({ ok: false })),
-        // 3. Policies that need to be assigned to an agent
-        fetch("http://127.0.0.1:8000/api/manager/policies/assignable/", { headers }).catch(e => ({ ok: false })),
-        // 4. Claims that have been approved by agents and need manager review
-        fetch("http://127.0.0.1:8000/api/supervisor/claims/", { headers }).catch(e => ({ ok: false })),
+        fetch(apiUrl("/api/manager/policies/pending/"), { headers }).catch(e => ({ ok: false })),
+        fetch(apiUrl("/api/manager/employees/"), { headers }).catch(e => ({ ok: false })),
+        fetch(apiUrl("/api/manager/policies/assignable/"), { headers }).catch(e => ({ ok: false })),
+        fetch(apiUrl("/api/supervisor/claims/"), { headers }).catch(e => ({ ok: false })),
       ]);
 
-      // Process Policy Approvals data
+      // Handle Policy Approvals
       if (pendingRes.ok) {
         const pendingData = await pendingRes.json();
         setCustomerPlans(pendingData.policies || []);
-        // Filter strictly for 'pending' status to avoid showing processed items
+        // Strict filtering to ensure only 'pending' items appear
         const onlyPending = (pendingData.policies || []).filter((p) => {
           const s = String(p.Status || p.status || "pending").toLowerCase();
           return s === "pending";
@@ -81,19 +82,19 @@ function ManagerHomePage() {
         setPendingPolicies(onlyPending);
       }
 
-      // Process Employees list
+      // Handle Agents List
       if (agentsRes.ok) {
         const agentsData = await agentsRes.json();
         setAgents(agentsData.employees || []);
       }
 
-      // Process Assignable Policies data
+      // Handle Assignable Policies
       if (allPolRes.ok) {
         const allPolData = await allPolRes.json();
         setAllPolicies(allPolData.policies || []);
       }
 
-      // Process Claims data
+      // Handle Claims
       if (claimsRes.ok) {
         const claimsData = await claimsRes.json();
         setClaims(claimsData.claims || []);
@@ -112,13 +113,13 @@ function ManagerHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedUserID]);
 
-  // Handles the Manager's decision to Approve or Deny a new Policy
+  // Action: Manager approves or denies a new Policy application
   const handleDecision = async (policyId, decision) => {
     console.log(`Policy ${policyId} decision: ${decision}`);
     setProcessingId(policyId);
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/manager/policies/${policyId}/decision/`,
+        apiUrl(`/api/manager/policies/${policyId}/decision/`),
         {
           method: "POST",
           headers: {
@@ -138,7 +139,7 @@ function ManagerHomePage() {
         }
         const newStatus = (data && (data.newStatus || data.status)) || (decision === "approve" ? "approved" : "denied");
 
-        // Optimistically update the UI to remove the item from the pending list
+        // Optimistic UI update: Remove item from pending list immediately
         setAllPolicies((prev) =>
           prev.map((p) =>
             p.PolicyID === policyId ? { ...p, Status: newStatus } : p
@@ -156,7 +157,7 @@ function ManagerHomePage() {
     }
   };
 
-  // Helper to update the temporary state of dropdown selections for assignments
+  // Helper: Manage local state for policy assignment dropdowns
   const handleSelectionChange = (policyId, agentId) => {
     setAssignmentSelections((prev) => ({
       ...prev,
@@ -164,7 +165,7 @@ function ManagerHomePage() {
     }));
   };
 
-  // Commits the assignment of a Policy to a specific Agent
+  // Action: Assigns a policy to a selected agent
   const handleAssignAgent = async (policyId) => {
     const agentId = assignmentSelections[policyId];
     if (!agentId) return alert("Please select an agent first.");
@@ -172,7 +173,7 @@ function ManagerHomePage() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/manager/policies/${policyId}/assign/`,
+        apiUrl(`/api/manager/policies/${policyId}/assign/`),
         {
           method: "POST",
           headers: {
@@ -188,13 +189,13 @@ function ManagerHomePage() {
         throw new Error(errorData.error || "Failed to assign");
       }
 
-      // Update local state to reflect the new assignment immediately
+      // Update global policy list to reflect assignment status
       setAllPolicies((prev) =>
         prev.map((p) =>
           p.PolicyID === policyId ? { ...p, assignedAgentID: agentId } : p
         )
       );
-      // Clear the dropdown selection
+      // Clear dropdown selection
       setAssignmentSelections((prev) => {
         const newState = { ...prev };
         delete newState[policyId];
@@ -208,7 +209,7 @@ function ManagerHomePage() {
     }
   };
 
-  // Handles the Manager's decision to Approve or Deny a Claim
+  // Action: Manager approves or denies a Claim
   const handleClaimDecision = async (claimId, decision) => {
     if (!storedUserID) return;
     const note = (decisionNotes?.[claimId] || "").trim();
@@ -216,7 +217,7 @@ function ManagerHomePage() {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/supervisor/claims/${claimId}/decision/`,
+        apiUrl(`/api/supervisor/claims/${claimId}/decision/`),
         {
           method: "POST",
           headers: {
@@ -233,7 +234,7 @@ function ManagerHomePage() {
       }
       const data = await res.json();
 
-      // Update local state to move the claim from Pending to History
+      // Move claim from "Pending" to "History" by updating status
       setClaims((prev) =>
         prev.map((c) => {
           if (c.ClaimID !== claimId) return c;
@@ -246,7 +247,6 @@ function ManagerHomePage() {
           };
         })
       );
-      // Clear the note input
       setDecisionNotes((prev) => ({ ...prev, [claimId]: "" }));
     } catch (err) {
       console.error(err);
@@ -257,9 +257,9 @@ function ManagerHomePage() {
   };
 
 
-  // --- View Components ---
+  // --- UI Components ---
 
-  // Renders a single Policy card for the "Pending Policies" tab
+  // Component: Card for Policy Approval tab
   const renderApprovalCard = (policy) => (
     <div
       key={policy.PolicyID}
@@ -307,7 +307,7 @@ function ManagerHomePage() {
     </div>
   );
 
-  // Renders the table for assigning policies to agents
+  // Component: Table for assigning policies to agents
   const renderAssignTab = () => {
     const policiesToAssign = allPolicies.filter(
       (p) => !p.assignedAgentID && p.Status !== "rejected"
@@ -403,7 +403,7 @@ function ManagerHomePage() {
     );
   };
 
-  // Renders the agent workload overview
+  // Component: Dashboard overview of Agent workloads
   const renderOverviewTab = () => {
     const getassignedAgentID = (p) => {
       const v =
@@ -480,9 +480,8 @@ function ManagerHomePage() {
     );
   };
 
-  // Renders the Claims workflow tab (New Feature)
-  const renderClaimsTab = () => {
-    // Filter claims into pending (needs attention) and history (already processed)
+  // Component: Claims Review Tab (Pending vs History)
+const renderClaimsTab = () => {
     const pendingClaims = claims.filter(
       (c) => !c.managerApprovalStatus || c.managerApprovalStatus.toLowerCase() === "pending"
     );
@@ -492,7 +491,7 @@ function ManagerHomePage() {
 
     return (
       <div className="space-y-10 max-w-6xl mx-auto">
-        {/* Sub-section: Claims waiting for Manager decision */}
+        {/* Section: Pending Reviews */}
         <section>
           <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span>⚖️</span> Reviews Required
@@ -533,6 +532,7 @@ function ManagerHomePage() {
                         <td className="p-4 font-semibold text-gray-800">${claim.Amount?.toLocaleString()}</td>
                         <td className="p-4">
                           <div className="flex flex-col gap-2 min-w-[220px]">
+                            {/* Input and Buttons logic remains the same */}
                             <input
                               type="text"
                               placeholder="Manager Note (Optional)"
@@ -545,18 +545,14 @@ function ManagerHomePage() {
                             />
                             <div className="flex gap-2">
                               <button
-                                className={`flex-1 py-1.5 rounded text-white text-xs font-bold shadow-sm transition ${
-                                  decisionBusy?.[claim.ClaimID] ? "bg-green-300 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
-                                }`}
+                                className="flex-1 py-1.5 rounded text-white text-xs font-bold bg-green-600 hover:bg-green-700"
                                 onClick={() => handleClaimDecision(claim.ClaimID, "approve")}
                                 disabled={!!decisionBusy?.[claim.ClaimID]}
                               >
                                 Approve
                               </button>
                               <button
-                                className={`flex-1 py-1.5 rounded text-white text-xs font-bold shadow-sm transition ${
-                                  decisionBusy?.[claim.ClaimID] ? "bg-red-300 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"
-                                }`}
+                                className="flex-1 py-1.5 rounded text-white text-xs font-bold bg-red-600 hover:bg-red-700"
                                 onClick={() => handleClaimDecision(claim.ClaimID, "deny")}
                                 disabled={!!decisionBusy?.[claim.ClaimID]}
                               >
@@ -574,7 +570,7 @@ function ManagerHomePage() {
           </div>
         </section>
 
-        {/* Sub-section: History of processed claims */}
+        {/* Section: Past Claims History */}
         <section>
           <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span>🗄️</span> Claims History
@@ -611,7 +607,8 @@ function ManagerHomePage() {
                                 : "bg-red-100 text-red-700"
                             }`}
                           >
-                            {claim.managerApprovalStatus}
+                            {/* FIX: Default to 'Pending' if null/undefined */}
+                            {claim.managerApprovalStatus || "Pending"}
                           </span>
                         </td>
                       </tr>
@@ -624,8 +621,9 @@ function ManagerHomePage() {
         </section>
       </div>
     );
-  };
 
+
+  };
   return (
     <div className="flex bg-gray-100 min-h-screen font-sans">
       {/* Sidebar Navigation */}
