@@ -1,0 +1,8 @@
+{
+  "userID": 1,
+  "policyID": 1,
+  "itemID": 1,
+  "amount": 1000,
+  "reason": "Stolen during break-in",
+  "lossDate": "2024-10-20"
+}

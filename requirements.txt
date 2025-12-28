@@ -1,0 +1,9 @@
+Django==5.2.7
+djangorestframework==3.16.1
+mongoengine==0.29.1
+python-dotenv==1.0.1
+sshtunnel==0.4.0
+# sshtunnel 0.4.0 expects Paramiko to expose DSSKey; pin to a compatible version
+paramiko<3.4
+argon2-cffi>=23.1.0
+django-cors-headers==4.4.0
